@@ -1,0 +1,328 @@
+---
+title: "Thalamus Analysis"
+author: "FG"
+date: "5 3 2021"
+output: 
+  bookdown::html_document2:
+    code_folding: hide
+    toc: yes
+    toc_depth: 5
+    highlight: tango
+    theme: paper
+    fig_width: 20
+    fig_height: 20
+    fig_caption: yes
+    number_sections: yes
+    keep_md: yes
+    df_print: default
+---
+
+```{r library, results='hide', message=FALSE, warning=FALSE} 
+# library(devtools) # for development versions on GitHub
+library(htmlTable)
+#library(magick)
+library(rmarkdown)
+library(Hmisc)
+# library(Rcmdr)
+library(dplyr)
+library(psych)
+library(pastecs)
+library(tidyr)
+library(tidyverse)
+library(ggplot2) # for data visualization (plotting)
+library(car) # for statistical models (ANCOVA with type III errors), dummy coding
+library(MatchIt) # for propensity (e.g. age, IQ) matching
+# library(purrr)  # for applying functions and working with lists (e.g. map(), reduce(), transpose())
+# library(stringr) # for string manipulation (e.g. str_detect(), str_extract(), str_subset(); string pattern - regular expressions)
+# library(forcats) # for dealing with factors (e.g. reordering)
+library(ggforce) # extends functionality of ggplot2 (e.g. spreads boxplot facets (facet_wrap) over multiple pages)
+library(cowplot) # extends functionality of ggplot2 (e.g. create raincloud plots)
+# library(PupillometryR) # for raincloud (flat violin) plots
+library(ggsci) # alternative color tool/palettes for plotting (scientific journal style)
+library(ggpubr) # extends functionality of ggplot2 (e.g. editing options for publication)
+library(ggsignif) # for adding significance brackets and labels to ggplots (better compatible with geom_boxplot() than ggpubr)
+# library(stargazer) # for creating aesthetic table outputs to summarize analyses
+library(kableExtra) # for creating kables (customized tables in RMarkdown output with styling options)
+library(bookdown) # support for numbering figure and table captions
+library(rstatix) # for statistical tests (in combination with dplyr/piping and plotting) and summary statistics
+# library(psych) # additional statistic options (e.g. correlation matrix, partial correlations)
+# library(lme4) # for linear mixed modelling
+library(MASS) # for robust linear model
+library(broom) # tidy test output, e.g. of GLM
+library(emmeans) # for estimated marginal means (EMM) (covariate-adjusted means in ANCOVA)
+library(sfsmisc) # for p values of robust regression analyses
+# library(broom.mixed) # tidy mixed model
+library(scales) # for scale and percentage formatting (optional)
+# library(corrplot) # generate correlation matrix/visualization
+# library(ppcor) # for partial correlations
+# library(effectsize) # for effect size statistics (e.g. eta squared, Cohen's d)
+library(sjstats) # for effect size statistics
+# library(pwr) # basic functions for power analysis
+# library(broom)
+# #library(matlib) # for Gram-Schmidt Orthogonalization of a Matrix
+# library(tidystats) # make lists and dataframes out of statistical test results
+# library(reshape2) # for transposing/melting data (can also be done with dplyr)
+# library(RColorBrewer) # color tool/palettes for plotting
+# library(captioner) # support for numbering figure and table captions (alternative to bookdown)
+library(sqldf)
+```
+
+# Statistics for thalamus and thalamic nuclei
+
+### getting Dataframe with demographics and FS data´
+```{r demographics, results="asis", message=FALSE, warning=FALSE}
+demographics <- glmdata %>% 
+  left_join(sample, by=c("storage_name", "point_of_research", "age_at_date_of_research")) %>%
+  distinct(storage_name, .keep_all = TRUE) %>%
+  dplyr::select(participant_id, 
+                point_of_research, 
+                age_at_date_of_research, 
+                bmi_at_date_of_research,
+                bmisds_at_date_of_research,
+                iq,
+                resultquest_bdi2_total,
+                resultquest_edi2_ss,
+                resultquest_edi2_uk,
+                resultquest_edi2_iw,
+                resultquest_scl90r_skazwang,
+                research_blood_results_leptin, 
+                e_tiv)
+  #mutate(edi_core = (resultquest_edi2_ss + resultquest_edi2_uk + resultquest_edi2_b)/3)
+
+labeller.function <- function(x) { # labels in output tables (no underscores)
+  dplyr::recode(x,
+                "age_at_date_of_research" = "Age",
+                "bmi_at_date_of_research" = "BMI",
+                "bmisds_at_date_of_research" = "BMI-SDS",
+                "iq" = "IQ",
+                "resultquest_bdi2_total" = "BDI-II total",
+                "resultquest_edi2_ss" = "EDI-2 Drive for Thinness",
+                "resultquest_edi2_uk" = "EDI-2 Body Dissatisfaction",
+                "resultquest_edi2_iw" = "EDI-2 Interoceptive Awareness",
+                "resultquest_scl90r_skazwang" = "SCL-90-R Compulsiveness",
+                "research_blood_results_leptin" = "Leptin (µg/L)",
+                "e_tiv" = "eTIV"
+                #"subcort_gray" = "Subcortical GM",
+                #"resultquest_edi2_ss" = "EDI-2 drive for thinness",
+                #"resultquest_edi2_uk" = "EDI-2 body dissatisfaction",
+                #"resultquest_edi2_b" = "EDI-2 bulimia",
+                #"edi_core" = "EDI-2 core symptoms",
+                #"s.anxiety" = "STAI(K) State Anxiety",
+                #"t.anxiety" = "STAI(K) Trait Anxiety",
+                #"bas_rewardresponsiveness" = "BAS reward responsiveness",
+                #"bis" = "BIS",
+                #"resultquest_bscs_i" = "BSCS impulse control",
+                #"resultquest_bscs_s" = "BSCS self-discipline"
+                #"minbmi" = "Minimal lifetime BMI",
+                #"cnr_total" = "CNR",
+                #"snr" = "SNR"
+                #"total_gray" = "Total GM"  
+                )
+  }
+
+variables_grouper <- c(age_at_date_of_research = "Demographics and BMI", 
+                       bmi_at_date_of_research = "Demographics and BMI",
+                       bmisds_at_date_of_research = "Demographics and BMI",
+                       iq = "Demographics and BMI",
+                       resultquest_bdi2_total = "Symptoms",
+                       resultquest_edi2_ss = "Symptoms",
+                       resultquest_edi2_uk = "Symptoms",
+                       resultquest_edi2_iw = "Symptoms",
+                       resultquest_scl90r_skazwang = "Symptoms",
+                       research_blood_results_leptin = "Hormone parameter",
+                       e_tiv = "Brain segmentation volumes")
+
+         
+demographics_stats <- demographics%>%
+  group_by(point_of_research) %>%
+  rstatix::get_summary_stats(age_at_date_of_research, 
+                             bmi_at_date_of_research, 
+                             bmisds_at_date_of_research, 
+                             iq,
+                             resultquest_bdi2_total, 
+                             resultquest_edi2_ss,
+                             resultquest_edi2_uk,
+                             resultquest_edi2_iw,
+                             resultquest_scl90r_skazwang,
+                             research_blood_results_leptin, 
+                             e_tiv) %>%
+  dplyr::select(point_of_research, variable, n, mean, sd) %>%
+  mutate(variable = factor(variable, levels=c("age_at_date_of_research", 
+                                              "bmi_at_date_of_research",
+                                              "bmisds_at_date_of_research",
+                                              "iq",
+                                              "resultquest_bdi2_total", 
+                                              "resultquest_edi2_ss",
+                                              "resultquest_edi2_uk",
+                                              "resultquest_edi2_iw",
+                                              "resultquest_scl90r_skazwang" ,
+                                              "research_blood_results_leptin", 
+                                              "e_tiv"))) %>%
+  arrange(variable) %>% 
+  mutate(variable = as.character(variable))
+
+demographics_stats_HC <- demographics_stats %>% filter(point_of_research %in% "HCW") %>%
+  dplyr::select(-point_of_research)
+
+demographics_stats_HC_T1 <- demographics_stats %>% filter(point_of_research %in% "T1") %>%
+  dplyr::select(-point_of_research) %>%
+  full_join(demographics_stats_HC, by="variable") %>%
+  mutate(variables_group = dplyr::recode(variable, !!!variables_grouper, .default = "missing group"))
+```
+
+### T-tests
+```{r asterisk_function, results="asis", message=FALSE, warning=FALSE}
+asterisk_function <- function(x) {
+  ifelse(is.na(x), NA, 
+  symnum(x, 
+         cutpoints = c(0, 0.001, 0.01, 0.05, 1), 
+         symbols = c("(***)", "(**)", "(*)", "(ns)"))
+  )
+}
+```
+
+
+````{r ttests01, results="asis", message=FALSE, warning=FALSE}
+t.testdata <- demographics %>%
+  mutate(point_of_research = relevel(as.factor(point_of_research), ref="HCW")) %>%
+  dplyr::select(point_of_research, 
+                age_at_date_of_research,
+                bmi_at_date_of_research,
+                bmisds_at_date_of_research, 
+                iq, 
+                resultquest_bdi2_total, 
+                resultquest_edi2_ss,
+                resultquest_edi2_uk,
+                resultquest_edi2_iw,
+                resultquest_scl90r_skazwang, 
+                research_blood_results_leptin, 
+                e_tiv) %>%
+  pivot_longer(-point_of_research, names_to = "variable", values_to = "value") %>%
+  nest(data = -variable)
+  
+t.testdatatable <- t.testdata %>% 
+  mutate(
+     ttest = map(data, ~ t.test(value ~ point_of_research, data = .x, na.action=na.omit,
+                                paired=FALSE, alternative="two.sided", var.equal=FALSE)),
+    tidied = map(ttest, tidy)) %>%
+  unnest(tidied) %>%
+  mutate(p.value = formatC(p.value, format="f")) %>%
+  mutate(p.value = as.numeric(p.value)) %>%
+  mutate(significance = as.character(asterisk_function(p.value))) %>%
+  dplyr::select(variable, method, statistic, p.value, significance)  %>%
+  mutate(variables_group = dplyr::recode(variable, !!!variables_grouper, 
+                                       .default = "missing group"))
+```
+
+```{r}
+dem.table <- demographics_stats_HC_T1 %>%
+  left_join(t.testdatatable, by=c("variable", "variables_group")) %>%
+  mutate(variable.labelled = labeller.function(variable)) %>%
+  dplyr::select(variable.labelled, everything()) %>%
+  mutate(mean.x = ifelse(variable %in% c("e_tiv", "subcort_gray"),
+                         formatC(mean.x, format="f", big.mark=",", digits=0),
+                         formatC(mean.x, format="f", digits=2))) %>%
+  mutate(mean.y = ifelse(variable %in% c("e_tiv", "subcort_gray"),
+                         formatC(mean.y, format="f", big.mark=",", digits=0),
+                         formatC(mean.y, format="f", digits=2))) %>%
+  mutate(sd.x = ifelse(variable %in% c("e_tiv", "subcort_gray"),
+                         formatC(sd.x, format="f", big.mark=",", digits=0),
+                         formatC(sd.x, format="f", digits=2))) %>%
+  mutate(sd.y = ifelse(variable %in% c("e_tiv", "subcort_gray"),
+                         formatC(sd.y, format="f", big.mark=",", digits=0),
+                         formatC(sd.y, format="f", digits=2))) %>%
+  mutate(df = (n.x+n.y)-2) %>% 
+  mutate("mean_AN" = mean.x,
+         "SD_AN" = sd.x,
+         "mean_HC" = mean.y,
+         "SD_HC" = sd.y,
+         "n_AN" = n.x,
+         "n_HC" = n.y) %>%
+  dplyr::select(variable.labelled, n_AN, mean_AN, SD_AN, n_HC, mean_HC, SD_HC, statistic, df, p.value) %>% # Method = Welch Two-Sample t-test (unequal variances)
+  mutate(p.value = formatC(p.value, format="f", digits=3)) %>%
+  mutate(p.value = ifelse(p.value<0.001, "<0.001", p.value))
+write.csv(dem.table,"tables/demographics_C.csv", row.names = FALSE)
+```
+
+
+```{r ttestsjoin, results="asis", message=FALSE, warning=FALSE}
+dem <- demographics_stats_HC_T1 %>%
+  left_join(t.testdatatable, by=c("variable", "variables_group")) %>%
+  mutate(variable.labelled = labeller.function(variable)) %>%
+  dplyr::select(variable.labelled, everything()) %>%
+  mutate(mean.x = ifelse(variable %in% c("e_tiv", "subcort_gray"),
+                         formatC(mean.x, format="f", big.mark=",", digits=0),
+                         formatC(mean.x, format="f", digits=2))) %>%
+  mutate(mean.y = ifelse(variable %in% c("e_tiv", "subcort_gray"),
+                         formatC(mean.y, format="f", big.mark=",", digits=0),
+                         formatC(mean.y, format="f", digits=2))) %>%
+  mutate(sd.x = ifelse(variable %in% c("e_tiv", "subcort_gray"),
+                         formatC(sd.x, format="f", big.mark=",", digits=0),
+                         formatC(sd.x, format="f", digits=2))) %>%
+  mutate(sd.y = ifelse(variable %in% c("e_tiv", "subcort_gray"),
+                         formatC(sd.y, format="f", big.mark=",", digits=0),
+                         formatC(sd.y, format="f", digits=2))) %>%
+  mutate(df = (n.x+n.y)-2) %>% 
+  unite("N", c(n.x, n.y), sep = "/", remove = FALSE, na.rm = FALSE) %>%
+  unite("mean_sd_AN", c(mean.x, sd.x), sep = " ± ", remove = FALSE, na.rm = FALSE) %>%
+  unite("mean_sd_HC", c(mean.y, sd.y), sep = " ± ", remove = FALSE, na.rm = FALSE) %>%
+  dplyr::select(variable.labelled, N, mean_sd_AN, mean_sd_HC, statistic, df, p.value) %>% # Method = Welch Two-Sample t-test (unequal variances)
+  mutate(p.value = formatC(p.value, format="f", digits=3)) %>%
+  mutate(p.value = ifelse(p.value<0.001, "<0.001", p.value)) %>%
+  knitr::kable(format = "html", digits=2, col.names = c("", "acAN/HC", "acAN", "HC", "t", "df", "p"), align = "l", caption = "Table 1. Demographic variables and clinical measures of the current sample") %>%
+  kable_paper(full_width=FALSE, position="left", html_font="Arial", font_size="15") %>%
+  add_header_above(c("", "n", "Sample"=2, "Analyses"=3), align="l") %>% 
+  pack_rows(index = table(fct_inorder(t.testdatatable$variables_group))) %>%
+  save_kable(file="tables/thalamus_demographics_C.png", zoom=5)
+```
+
+### Thalamus nuclei - descriptive statistics
+```{r thalamusdescriptives, results="asis", message=FALSE, warning=FALSE}
+descrthalamus <- glmdata %>% 
+  group_by(point_of_research, region, hemi_region, labeller, group, hemi_group, group_labeller, region_type) %>%
+  rstatix::get_summary_stats(measure) %>%
+  dplyr::select(region, hemi_region, labeller, group, hemi_group, group_labeller, region_type, point_of_research, n, mean, sd, min, max)
+
+# Generate relative y positions of p-values and brackets for later plotting of results
+y.position <- descrthalamus %>% 
+  group_by(region) %>%
+  arrange(desc(max), .by_group=TRUE) %>%
+  slice_head(n = 1) %>%
+  mutate(y.position = 1.05*max) %>%
+  dplyr::select(region, y.position) %>%
+  ungroup()
+  
+descrthalamus_T1 <- descrthalamus %>% filter(point_of_research %in% "T1") %>%
+  dplyr::select(-c(point_of_research, region, group, hemi_group, group_labeller))
+
+descrthalamus_HC <- descrthalamus %>% filter(point_of_research %in% "HCW") %>%
+  dplyr::select(-c(point_of_research, region,  group, hemi_group, group_labeller))
+
+descrthalamus_join <- full_join(descrthalamus_T1, descrthalamus_HC, by=c("hemi_region", "labeller", "region_type")) %>%
+  arrange(hemi_region) %>%
+  mutate(hemi_region = as.character(hemi_region))
+  
+descrthalamus_join %>%
+  mutate(mean.x = formatC(mean.x, format="f", big.mark=",", digits=2)) %>%
+  mutate(mean.y = formatC(mean.y, format="f", big.mark=",", digits=2)) %>%
+  mutate(sd.x = formatC(sd.x, format="f", digits=2)) %>%
+  mutate(sd.y = formatC(sd.y, format="f", digits=2)) %>%
+  mutate(min.x = formatC(min.x, format="f", big.mark=",", digits=2)) %>%
+  mutate(min.y = formatC(min.y, format="f", big.mark=",", digits=2)) %>%
+  mutate(max.x = formatC(max.x, format="f", big.mark=",", digits=2)) %>%
+  mutate(max.y = formatC(max.y, format="f", big.mark=",", digits=2)) %>%
+  unite("N", c(n.x, n.y), sep = "/", remove = FALSE, na.rm = FALSE) %>%
+  unite("mean_sd_AN", c(mean.x, sd.x), sep = " ± ", remove = FALSE, na.rm = FALSE) %>%
+  unite("mean_sd_HC", c(mean.y, sd.y), sep = " ± ", remove = FALSE, na.rm = FALSE) %>%
+  unite("range_AN", c(min.x, max.x), sep = " – ", remove = FALSE, na.rm = FALSE) %>%
+  unite("range_HC", c(min.y, max.y), sep = " – ", remove = FALSE, na.rm = FALSE) %>%
+  dplyr::select(labeller, N, mean_sd_AN, range_AN, mean_sd_HC, range_HC) %>%
+  knitr::kable(format = "html", digits=2, col.names = c("Raw volumes in mm^3", "acAN/HC", "Mean ± SD", "Range (min – max)", "Mean ± SD", "Range (min – max)"), align = "l", caption = "Descriptive statistics of raw thalamic (nuclei) volumes (whole thalamus and all nuclei) in acAN and age-matched HC") %>%
+  kable_paper(bootstrap_options="striped", full_width=FALSE, position="left", html_font="Arial",
+              font_size="15") %>%
+  add_header_above(c("", "n", "acAN"=2, "HC"=2)) %>%
+  add_header_above(c("","", "Sample"=4)) %>%
+  pack_rows(index = table(fct_inorder(descrthalamus_join$region_type))) %>%
+  save_kable(file="tables/thalamus_volumes_C.png", zoom=4)
+```
+

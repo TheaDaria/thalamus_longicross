@@ -1,0 +1,111 @@
+---
+title: "Thalamus Analysis"
+author: "FG"
+date: "5 3 2021"
+output: 
+  bookdown::html_document2:
+    code_folding: hide
+    toc: yes
+    toc_depth: 5
+    highlight: tango
+    theme: paper
+    fig_width: 20
+    fig_height: 20
+    fig_caption: yes
+    number_sections: yes
+    keep_md: yes
+    df_print: default
+---
+
+```{r library, results='hide', message=FALSE, warning=FALSE} 
+# library(devtools) # for development versions on GitHub
+library(htmlTable)
+#library(magick)
+library(rmarkdown)
+library(Hmisc)
+# library(Rcmdr)
+library(dplyr)
+library(psych)
+library(pastecs)
+library(tidyr)
+library(tidyverse)
+library(ggplot2) # for data visualization (plotting)
+library(car) # for statistical models (ANCOVA with type III errors), dummy coding
+library(MatchIt) # for propensity (e.g. age, IQ) matching
+# library(purrr)  # for applying functions and working with lists (e.g. map(), reduce(), transpose())
+# library(stringr) # for string manipulation (e.g. str_detect(), str_extract(), str_subset(); string pattern - regular expressions)
+# library(forcats) # for dealing with factors (e.g. reordering)
+library(ggforce) # extends functionality of ggplot2 (e.g. spreads boxplot facets (facet_wrap) over multiple pages)
+library(cowplot) # extends functionality of ggplot2 (e.g. create raincloud plots)
+# library(PupillometryR) # for raincloud (flat violin) plots
+library(ggsci) # alternative color tool/palettes for plotting (scientific journal style)
+library(ggpubr) # extends functionality of ggplot2 (e.g. editing options for publication)
+library(ggsignif) # for adding significance brackets and labels to ggplots (better compatible with geom_boxplot() than ggpubr)
+# library(stargazer) # for creating aesthetic table outputs to summarize analyses
+library(kableExtra) # for creating kables (customized tables in RMarkdown output with styling options)
+library(bookdown) # support for numbering figure and table captions
+library(rstatix) # for statistical tests (in combination with dplyr/piping and plotting) and summary statistics
+# library(psych) # additional statistic options (e.g. correlation matrix, partial correlations)
+# library(lme4) # for linear mixed modelling
+library(MASS) # for robust linear model
+library(broom) # tidy test output, e.g. of GLM
+library(emmeans) # for estimated marginal means (EMM) (covariate-adjusted means in ANCOVA)
+library(sfsmisc) # for p values of robust regression analyses
+# library(broom.mixed) # tidy mixed model
+library(scales) # for scale and percentage formatting (optional)
+# library(corrplot) # generate correlation matrix/visualization
+# library(ppcor) # for partial correlations
+# library(effectsize) # for effect size statistics (e.g. eta squared, Cohen's d)
+library(sjstats) # for effect size statistics
+# library(pwr) # basic functions for power analysis
+# library(broom)
+# #library(matlib) # for Gram-Schmidt Orthogonalization of a Matrix
+# library(tidystats) # make lists and dataframes out of statistical test results
+# library(reshape2) # for transposing/melting data (can also be done with dplyr)
+# library(RColorBrewer) # color tool/palettes for plotting
+# library(captioner) # support for numbering figure and table captions (alternative to bookdown)
+library(sqldf)
+```
+
+###### Supplements ######################################################################################################################################
+
+## find model subject for visualization in freeview:
+## Group T1, Age & BMI-SDS similar to sample means
+## no outliers in general or substructur QC
+```{r findmodelsubject, results='hide', message=FALSE, warning=FALSE}
+sample %>%
+  dplyr::select(storage_name,
+                point_of_research,
+                mriqc_smri_summary,
+                mriqc_smri_thal_summary,
+                age_at_date_of_research, 
+                bmisds_at_date_of_research)%>%
+  filter(point_of_research == "T1") %>%
+  filter(mriqc_smri_summary == "0 = voellig unauffaellig") %>%
+  filter(mriqc_smri_thal_summary == "Einschluss") %>%
+  filter(age_at_date_of_research < 16.7) %>% # mean age is 16.39 .. also quasi 16.4
+  filter(age_at_date_of_research > 16.1) %>% 
+  filter(bmisds_at_date_of_research > -3.6) %>% # mean BMI-SDS is -3.27 
+  filter(bmisds_at_date_of_research < -3.04)
+```
+
+
+
+## Sample Age distribution with simple theme
+```{r}
+glmdata %>% filter(hemi_region == "lh_Whole_thalamus")%>%
+  #filter(point_of_research == "T1") %>%
+  filter(point_of_research == "HCW") %>%
+  dplyr::select(age_at_date_of_research) %>%
+  ggplot(aes(age_at_date_of_research)) +
+  geom_histogram(binwidth = 1, col = "Black",fill = "Transparent")+
+  scale_x_continuous(breaks=seq(0,40,2), name = "Age (years)")+
+  scale_y_continuous(breaks=seq(0,85,10), name = "Frequency")+
+  #ggtitle("Age of participants with anorexia nervosa")+
+  ggtitle("Age of healthy control participants")+
+  plot_theme_light +
+  #ggsave(filename="figures/age_frequency_T1_C.png", width=7, height=6)
+  ggsave(filename="figures/age_frequency_HC_C.png", width=7, height=6)
+  
+```
+

@@ -1,0 +1,125 @@
+---
+title: "Thalamus Analysis"
+author: "FG"
+date: "5 3 2021"
+output: 
+  bookdown::html_document2:
+    code_folding: hide
+    toc: yes
+    toc_depth: 5
+    highlight: tango
+    theme: paper
+    fig_width: 20
+    fig_height: 20
+    fig_caption: yes
+    number_sections: yes
+    keep_md: yes
+    df_print: default
+---
+
+```{r library, results='hide', message=FALSE, warning=FALSE} 
+library(htmlTable)
+library(rmarkdown)
+library(Hmisc)
+library(dplyr)
+library(psych)
+library(pastecs)
+library(tidyr)
+library(tidyverse)
+library(ggplot2) # for data visualization (plotting)
+library(car) # for statistical models (ANCOVA with type III errors), dummy coding
+library(MatchIt)
+library(ggforce) # extends functionality of ggplot2 (e.g. spreads boxplot facets (facet_wrap) over multiple pages)
+library(cowplot) # extends functionality of ggplot2 (e.g. create raincloud plots)
+library(ggsci) # alternative color tool/palettes for plotting (scientific journal style)
+library(ggpubr) # extends functionality of ggplot2 (e.g. editing options for publication)
+library(ggsignif)
+library(kableExtra) # for creating kables (customized tables in RMarkdown output with styling options)
+library(bookdown) # support for numbering figure and table captions
+library(rstatix)
+library(MASS) # for robust linear model
+library(broom) # tidy test output, e.g. of GLM
+library(emmeans) # for estimated marginal means (EMM) (covariate-adjusted means in ANCOVA)
+library(sfsmisc) # for p values of robust regression analyses
+library(scales)
+library(sjstats) # for effect size statistics
+library(sqldf)
+```
+
+```{r figuresettings, results='hide', include=TRUE, message=FALSE, warning=FALSE}
+plot_theme = theme(plot.title = element_text(size=18, face="bold"),
+                   strip.text = element_text(size=16), 
+                   axis.text = element_text(size=16), 
+                   axis.title = element_text(size=16), 
+                   axis.line = element_line(color = "black"), 
+                   legend.position = "right", 
+                   legend.title = element_text(size=16), 
+                   legend.text = element_text(size=16)) 
+
+plot_theme_transparent = theme(plot.title = element_text(size=30, face="bold"), 
+                   strip.text = element_text(size=30), 
+                   axis.text = element_text(size=30), 
+                   axis.title = element_text(30), 
+                   axis.line = element_line(color = "black"), 
+                   #legend.position = "right", 
+                   #legend.title = element_text(size=30), 
+                   #legend.text = element_text(30),
+                   #legend.background = element_rect(fill="transparent"),
+                   #legend.box.background = element_rect(fill="transparent"),
+                   panel.background = element_rect(fill="transparent"), 
+                   plot.background = element_rect(fill="transparent", color=NA), 
+                   panel.border = element_blank(),
+                   panel.grid.major = element_blank(), 
+                   panel.grid.minor = element_blank(),
+                   strip.text.x = element_text(size=15),
+                   strip.text.y = element_text(size=15),
+                   strip.background = element_rect(color=NA, fill="grey90"))
+
+plot_theme_transparent2 = theme(plot.title = element_text(size=18, face="bold"), 
+                   strip.text = element_text(size=12), 
+                   axis.text = element_text(size=22), 
+                   axis.title = element_text(size=22), 
+                   axis.line = element_line(color = "black"), 
+                   panel.background = element_rect(fill="transparent"), 
+                   plot.background = element_rect(fill="transparent", color=NA), 
+                   panel.border = element_blank(),
+                   panel.grid.major = element_blank(), 
+                   panel.grid.minor = element_blank(), 
+                   strip.background = element_rect(color=NA, fill="grey90"))
+
+plot_theme_transparent3 = theme(plot.title = element_text(size=5, face="bold"), 
+                   strip.text = element_text(size=5), 
+                   axis.text.y = element_text(size=30),
+                   axis.text.x = element_text(size=30),
+                   axis.title = element_text(size=5), 
+                   axis.line = element_line(color = "black"), 
+                   panel.background = element_rect(fill="transparent"), 
+                   plot.background = element_rect(fill="transparent", color=NA), 
+                   panel.border = element_blank(),
+                   panel.grid.major = element_blank(), 
+                   panel.grid.minor = element_blank(), 
+                   strip.background = element_rect(color=NA, fill="grey90"))
+
+plot_theme_transparent3_grid = theme(plot.title = element_text(size=5, face="bold"), 
+                   strip.text = element_text(size=5), 
+                   axis.text.y = element_text(size=30),
+                   axis.text.x = element_text(size=30),
+                   axis.title = element_text(size=5), 
+                   axis.line = element_line(color = "black"), 
+                   #panel.background = element_rect(fill="transparent"), 
+                   plot.background = element_rect(fill="transparent", color=NA), 
+                   panel.border = element_blank(),
+                   #panel.grid.major = element_blank(), 
+                   panel.grid.minor = element_blank(), 
+                   strip.background = element_rect(color=NA, fill="grey90"))
+
+plot_theme_light = theme(plot.title = element_text(size=12, face="bold", hjust = 0.5),
+                   axis.text = element_text(8), 
+                   axis.title = element_text(8), 
+                   axis.line = element_line(color = "black"),
+                   panel.background = element_rect(fill="transparent"), 
+                   panel.border =element_blank(),
+                   panel.grid.major = element_blank(), 
+                   panel.grid.minor = element_blank())
+
+``` 

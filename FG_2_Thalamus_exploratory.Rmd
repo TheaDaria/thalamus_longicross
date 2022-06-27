@@ -1,0 +1,336 @@
+---
+title: "Thalamus Analysis"
+author: "FG"
+date: "5 3 2021"
+output: 
+  bookdown::html_document2:
+    code_folding: hide
+    toc: yes
+    toc_depth: 5
+    highlight: tango
+    theme: paper
+    fig_width: 20
+    fig_height: 20
+    fig_caption: yes
+    number_sections: yes
+    keep_md: yes
+    df_print: default
+---
+
+```{r library, results='hide', message=FALSE, warning=FALSE} 
+# library(devtools) # for development versions on GitHub
+library(htmlTable)
+#library(magick)
+library(rmarkdown)
+library(Hmisc)
+# library(Rcmdr)
+library(dplyr)
+library(psych)
+library(pastecs)
+library(tidyr)
+library(tidyverse)
+library(ggplot2) # for data visualization (plotting)
+library(car) # for statistical models (ANCOVA with type III errors), dummy coding
+library(MatchIt) # for propensity (e.g. age, IQ) matching
+# library(purrr)  # for applying functions and working with lists (e.g. map(), reduce(), transpose())
+# library(stringr) # for string manipulation (e.g. str_detect(), str_extract(), str_subset(); string pattern - regular expressions)
+# library(forcats) # for dealing with factors (e.g. reordering)
+library(ggforce) # extends functionality of ggplot2 (e.g. spreads boxplot facets (facet_wrap) over multiple pages)
+library(cowplot) # extends functionality of ggplot2 (e.g. create raincloud plots)
+# library(PupillometryR) # for raincloud (flat violin) plots
+library(ggsci) # alternative color tool/palettes for plotting (scientific journal style)
+library(ggpubr) # extends functionality of ggplot2 (e.g. editing options for publication)
+library(ggsignif) # for adding significance brackets and labels to ggplots (better compatible with geom_boxplot() than ggpubr)
+# library(stargazer) # for creating aesthetic table outputs to summarize analyses
+library(kableExtra) # for creating kables (customized tables in RMarkdown output with styling options)
+library(bookdown) # support for numbering figure and table captions
+library(rstatix) # for statistical tests (in combination with dplyr/piping and plotting) and summary statistics
+# library(psych) # additional statistic options (e.g. correlation matrix, partial correlations)
+# library(lme4) # for linear mixed modelling
+library(MASS) # for robust linear model
+library(broom) # tidy test output, e.g. of GLM
+library(emmeans) # for estimated marginal means (EMM) (covariate-adjusted means in ANCOVA)
+library(sfsmisc) # for p values of robust regression analyses
+# library(broom.mixed) # tidy mixed model
+library(scales) # for scale and percentage formatting (optional)
+# library(corrplot) # generate correlation matrix/visualization
+# library(ppcor) # for partial correlations
+# library(effectsize) # for effect size statistics (e.g. eta squared, Cohen's d)
+library(sjstats) # for effect size statistics
+# library(pwr) # basic functions for power analysis
+# library(broom)
+# #library(matlib) # for Gram-Schmidt Orthogonalization of a Matrix
+# library(tidystats) # make lists and dataframes out of statistical test results
+# library(reshape2) # for transposing/melting data (can also be done with dplyr)
+# library(RColorBrewer) # color tool/palettes for plotting
+# library(captioner) # support for numbering figure and table captions (alternative to bookdown)
+library(sqldf)
+```
+
+
+```{r}
+QC_data <- get_redcap()%>%
+  dplyr::select(point_of_research, redcap_event_name, participant_id, storage_name, mriqc_smri_thal_summary)%>%
+  rename(thal_summary_redcap = mriqc_smri_thal_summary) %>%
+  right_join(get_QC(), by =c("redcap_event_name", "participant_id", "storage_name"))%>%
+  dplyr::select(-c(outlier_regions_symmetry, outlier_regions_volume))
+  
+  write_csv("data/QC_with_group.csv")
+```
+```{r}
+a <- QC_data %>%
+  filter(point_of_research %in% c("HCW","T1"))
+
+b <- a %>%
+  filter(is.outlier_cnr == FALSE & is.outlier_snr == FALSE)
+
+c <- b %>% 
+  filter(mriqc_smri_summary < 3)
+
+d <- c %>%
+  filter(n_outliers_symmetry_4.721sd < 1 & n_outliers_volume_4.721sd < 1) # only extreme volume & symmetry outliers!
+
+d %>%
+  filter(n_outliers_volume_2.698sd > 1 | n_outliers_symmetry_2.698sd > 1) %>%
+  filter(mriqc_smri_thal_summary == 9)
+
+d %>%
+  filter(n_outliers_volume_2.698sd < 2 & n_outliers_symmetry_2.698sd < 2) %>%
+  filter(mriqc_smri_thal_summary == 9)
+
+
+```
+
+*10. getting summary stats for thalamic nuclei*
+```{r}
+glmdata %>% 
+  group_by(point_of_research, region, hemi_region, labeller) %>%
+  rstatix::get_summary_stats(measure) %>%
+  dplyr::select(hemi_region, labeller, point_of_research, n, mean, sd, min, max)
+```
+
+
+*11. select data for whole thalamus*
+```{r}
+whole.thal <- glmdata %>% filter(region == "Whole_thalamus")
+```
+
+
+# Descriptiv analysis for whole thalamus and subregions
+
+1. Relationship of age and 
+a) whole thal vol, 
+b) thal subregions vol, 
+c) eTIV
+
+2. Frequency distributions of
+a) whole thalamus volume
+b) thalamic nuclei volume
+c) eTIV
+
+3. Q-Q Plots for
+a) whole Thalamus
+b) thalamic nuclei
+
+## Impact of participant/patient age
+### Relationship of age and whole Thalamus volume for acAN T1 and HCW
+```{r}
+whole.thal %>%
+  ggplot(aes(x=age_at_date_of_research, y=measure, color=point_of_research)) +
+  geom_point() + 
+  geom_smooth(method=lm, aes(group=point_of_research, color=point_of_research, fill=point_of_research)) +
+  scale_fill_jama(alpha=0.8) + 
+  scale_color_jama(alpha=0.8) +
+  stat_cor(aes(label = paste(..rr.label.., ..p.label.., sep="~~~~")), label.y.npc = 1) +
+  plot_theme_transparent + 
+  labs(x = "Age at Date of Research", y = expression(paste("Whole thalamus volume in mm"^"3")))
+ggsave(filename="figures/scatterplot_age_by_whole.png", width=20, height=20)
+```
+
+
+### Relationship of age and thalamic subregion volume for acAN T1 and HCW
+```{r}
+glmdata %>%
+  ggplot(aes(x=age_at_date_of_research, y=measure, color=point_of_research)) +
+  geom_point() + 
+  geom_smooth(method=lm, aes(group=point_of_research, color=point_of_research, fill=point_of_research)) + 
+  scale_fill_jama(alpha=0.8) + 
+  scale_color_jama(alpha=0.8) +
+  plot_theme_transparent + 
+  stat_cor(aes(label = paste(..rr.label.., ..p.label.., sep="~~~~")), label.y.npc = 1) +
+  labs(x = "Age at Date of Research", y = expression(paste("Thalamus (sub-)region volume in mm"^"3"))) + 
+  facet_wrap(~ region , scales="free")
+ggsave(filename="figures/scatterplot_age_by_nuclei.png", width=20, height=20)
+```
+
+
+### Relationship of age and eTIV for acAN T1 and HCW
+```{r}
+whole.thal %>%
+  ggplot(aes(x=age_at_date_of_research, y=e_tiv, color=point_of_research)) +
+  geom_point() + 
+  geom_smooth(method=lm, aes(group=point_of_research, color=point_of_research, fill=point_of_research)) +
+  scale_fill_jama(alpha=0.8) + 
+  scale_color_jama(alpha=0.8) +
+  stat_cor(aes(label = paste(..rr.label.., ..p.label.., sep="~~~~")), label.y.npc = 1) +
+  plot_theme_transparent + 
+  labs(x = "Age at Date of Research", y = expression(paste("eTIV in mm"^"3")))
+ggsave(filename="figures/scatterplot_age_by_eTIV.png", width=20, height=20)
+```
+
+## Volume Distribution
+### Whole Thalamus volume frequency distributions for acAN T1 and HCW 
+```{r}
+whole.thal %>%
+  ggplot(aes(measure, fill = point_of_research)) + 
+  geom_histogram(binwidth = 50, alpha=0.7) + 
+  scale_fill_jama(alpha=0.8) + scale_color_jama(alpha=0.8) +
+  plot_theme_transparent + 
+  labs(x = expression(paste("Whole thalamus volume in mm"^"3")), y = "Frequency")
+ggsave(filename="figures/boxplot_norm_whole_HC_T1.png", width=20, height=20)
+```
+
+### Whole Thalamus volume Frequency distributions with normal curve for HCW
+```{r}
+whole.thal %>%
+  filter(point_of_research == "HCW") %>%
+  ggplot(aes(x=measure, fill=point_of_research)) +
+  geom_histogram(aes(y = ..density.. ), binwidth = 50,color = "grey40", fill ="lightblue4",size = 1) +
+  scale_fill_jama() +
+  plot_theme_transparent + 
+  labs(x = expression(paste("HCW: whole thalamus volume in mm"^"3")), y = "Density") + 
+  stat_function(fun = dnorm, args = list(mean = mean(whole.thal$measure), sd = sd(whole.thal$measure)), color = "grey20", size = 1)
+ggsave(filename="figures/hist_norm_whole_T1.png", width=20, height=20)
+```
+
+
+### Whole Thalamus volume Frequency distributions with normal curve for acAN T1
+```{r}
+whole.thal %>%
+  filter(point_of_research == "T1") %>%
+  ggplot(aes(x=measure, fill=point_of_research)) +
+  geom_histogram(aes(y = ..density.. ), binwidth = 50, color = "orange3", fill ="burlywood2",size = 1) +
+  scale_fill_jama(alpha=0.8) + 
+  scale_color_jama(alpha=0.8) +
+  plot_theme_transparent + 
+  labs(x = expression(paste("acAn T1: whole thalamus volume in mm"^"3")), y = "Density") + 
+  stat_function(fun = dnorm, args = list(mean = mean(whole.thal$measure), sd = sd(whole.thal$measure)), color = "darkorange4", size = 1)
+ggsave(filename="figures/hist_norm_whole_HCW.png", width=20, height=20)
+```
+
+### Whole Thalamus volume density plot for acAN T1 and HCW
+```{r}
+whole.thal %>%
+  ggplot(aes(measure, color = point_of_research)) +
+  geom_density() +
+  scale_color_jama(alpha=0.8) +
+  plot_theme_transparent
+ggsave(filename="figures/whole_density.png", width=20, height=20)
+
+```
+
+### Thalamus (sub-)regions Histograms with normal curve
+```{r figurehistothal, fig.cap="Histograms with normal curves for thalamus (nuclei) volumes", echo=TRUE, include=TRUE, message=FALSE, warning=FALSE}
+histos <- glmdata  %>%
+  group_by(region) %>% arrange(region, .by_group=TRUE) %>%
+  mutate(point_of_research = dplyr::recode(point_of_research,
+                                    "T1" = "AN",
+                                    "HCW" = "HC"))
+
+plotlist = list()
+
+bins <- 30
+
+for (Region in unique(histos$region)) {
+  
+  histdata <- histos %>% filter(region %in% Region)
+  
+  
+
+  bw <- histdata %>% # individual binwidths per plot depending on the measure range
+  summarize(bw = (max(measure) - min(measure))/bins) %>%
+  pull(bw)
+  
+  mean_sd_T1 <- histdata %>% filter(point_of_research %in% "AN") %>%
+    summarize(mean = mean(measure), sd = sd(measure))
+  
+  mean_sd_HC <- histdata %>% filter(point_of_research %in% "HC") %>%
+    summarize(mean = mean(measure), sd = sd(measure))
+  
+  thalahist <- histdata %>%
+    ggplot(aes(x=measure, fill=point_of_research)) +
+    geom_histogram(aes(y=..density..), binwidth=bw, alpha=0.7, position="identity") +
+    stat_function(color="grey35", size=1.5, fun=dnorm, args=list(mean=mean_sd_T1$mean, sd=mean_sd_T1$sd)) +
+    stat_function(color="gray60", size=1.5, fun=dnorm, args=list(mean=mean_sd_HC$mean, sd=mean_sd_HC$sd)) +
+    scale_fill_grey() +
+    #scale_fill_jama() +
+    scale_y_continuous(sec.axis = sec_axis(trans = ~. * bw )) +
+    scale_x_continuous(breaks = extended_breaks(n=3)) +
+    #scale_y_continuous(expand = c(0, 0)) +
+    plot_theme_transparent3 +
+    theme(axis.title.x = element_blank(), axis.title.y = element_blank()) +
+    theme(strip.text.x = element_text(size=30)) +
+    theme(legend.position = "none") +
+    #theme(axis.text.x=element_blank(), axis.ticks.x=element_blank()) +
+    facet_wrap(~ labeller, scales="free_x", labeller = label_wrap_gen(width=15))
+  
+ plotlist[[Region]] = thalahist
+ 
+}
+histo.nuclei <- plotlist[1:25] 
+
+ggarrange(plotlist=plotlist, common.legend = TRUE, legend="none", ncol=3, nrow=9) -> histoarrange
+histoarrange <- annotate_figure(histoarrange, 
+                bottom = text_grob(expression(paste("Volume in mm"^"3")), size=35),
+                left = text_grob("Frequency density", size=35, rot=90),
+                right = text_grob("Counts", size=35, rot=270))
+
+ggsave(histoarrange, path="figures", filename="histograms_normal_nuclei+whole.png", width=35, height=45, dpi=200)
+
+```
+
+### Thalamus subregions volumes Bar charts for acAN T1 and HCW 
+```{r}
+glmdata%>%
+  filter(region != "Whole_thalamus") %>%
+  ggplot(aes(region, measure, fill = point_of_research)) +
+  stat_summary(fun = mean, geom = "bar", position = "dodge") + 
+  stat_summary(fun.data = mean_cl_normal, geom = "errorbar", position = position_dodge(width = 1), width = 0.5) +
+  scale_fill_jama(alpha=0.8) + 
+  scale_color_jama(alpha=0.8) +
+  plot_theme_transparent + 
+  labs(x = "Thalamus nuclei names", y = expression(paste("Thalamic nuclei volume in mm"^"3")))
+ggsave(filename="figures/hist_AllNuclei.png", width=20, height=20)
+```
+
+
+### eTIV frequency distributions for acAN T1 and HCW (estimated Total Intracranial Volume, aka ICV)
+```{r}
+whole.thal %>%
+  ggplot(aes(e_tiv, fill=point_of_research)) + 
+  geom_histogram(binwidth = 10000) + 
+  scale_fill_jama(alpha=0.8) + 
+  scale_color_jama(alpha=0.8) +
+  plot_theme_transparent + 
+  labs(x = expression(paste("eTIV in mm"^"3")), y = "Frequency")
+```
+
+
+### Thalamus volume Q-Q Plots
+*stands for Quantile - Quantile Plot. Plots the comulative values of our data against the cumulative probability of a particular distribution: in this case a normal distribution.*
+*Data are ranked and sorted. Each value is compared to the expected value that the score should have in a normal distribution. Than plotted against each other.*
+### Thalamus subregions volume Q-Q Plots
+```{r}
+glmdata %>% 
+  mutate(point_of_research = fct_relevel(point_of_research, c("HCW", "T1"))) %>%
+  ggplot(aes(sample=measure, group=point_of_research, color=point_of_research)) +
+  stat_qq(geom="point", size=1.25, shape=16, alpha=1, position="identity") +
+  stat_qq_line(size=1.25) +
+  scale_fill_jama(alpha=0.8) + 
+  scale_color_jama(alpha=0.8) +
+  plot_theme_transparent + 
+  facet_wrap(~ region , scales="free")
+
+ggsave(filename="figures/nuclei_QQ_C.png", width=20, height=20)
+```
+
