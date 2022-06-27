@@ -172,79 +172,67 @@ get_snr <- function(){
 
 get_redcap <-function(){
   read_csv("data/redcap_do_not_delete/redcap.csv", col_types = cols())
-}
+}  %>%
+  filter(!str_detect(storage_name, "atd" )) %>% # exclude atd study arm
+  filter(!str_detect(storage_name, "^25" ))
 ```
 
-*7. getting matched sample*
-# how does the HC cohort look like?
-```{r}
-redcap_HC <- get_redcap() %>%
-  filter(point_of_research %in% "HCW") 
+*7. applying exclusion criteria before matching*
 
-HC_exclusion <- redcap_HC %>%
+# 1. exclusion based on redcap data
+exclude psychiatric comorbidities (in HC), medication (except SSRIs in T1)
+```{r} 
+redcap.medical <- get_redcap() %>%
+  filter(point_of_research == "HCW") %>%
   filter(psychiatric_disorders == "nein") %>%
-  filter(bmi_at_date_of_research >= 17.5 & bmi_at_date_of_research <= 28) 
+  dplyr::select(participant_id,point_of_research,storage_name,current_antidepressants_preparation,type_of_current_medication___1, type_of_current_medication___2, type_of_current_medication___3, type_of_current_medication___4, type_of_current_medication___5) %>%
+    rename(current_antidepressants = type_of_current_medication___1)%>%
+  rename(current_neuroleptic = type_of_current_medication___2)%>%
+  rename(current_stimulantien_MPH = type_of_current_medication___3)%>%
+  rename(current_mood_stabilizers = type_of_current_medication___4)%>%
+  rename(current_benzodiazepine = type_of_current_medication___5) %>%
+  group_by(participant_id) %>%
+  slice_head(n = 1) %>%
+  ungroup()
 
-HC_exclusion.medication <- HC_exclusion %>%
-  dplyr::select(participant_id,point_of_research,current_antidepressants_preparation,type_of_current_medication___1, type_of_current_medication___2, type_of_current_medication___3, type_of_current_medication___4, type_of_current_medication___5, type_of_current_medication___6, type_of_current_medication___7, type_of_current_medication___8, type_of_current_medication___9, type_of_current_medication___10, current_other_medication_preparation)%>%
-  filter_all(any_vars(str_detect(., "Checked")))%>%
-  mutate_all(funs(str_replace(., "Checked", "yes")))%>%
-  mutate_all(funs(str_replace(., "Unchecked", "no")))%>%
-  mutate_all(funs(str_replace(., "unbekannt", NA_character_)))%>%
-  mutate(n_current_antidepressants = sum(str_count(type_of_current_medication___1, "yes"))) %>%
-  mutate(n_current_neuroleptic = sum(str_count(type_of_current_medication___2, "yes")))%>%
-  mutate(n_current_stimulantien_MPH = sum(str_count(type_of_current_medication___3, "yes"))) %>%
-  mutate(n_current_mood_stabilizers = sum(str_count(type_of_current_medication___4, "yes"))) %>%
-  mutate(n_current_benzodiazepine = sum(str_count(type_of_current_medication___5, "yes"))) %>%
-  mutate(n_current_antihistaminika = sum(str_count(type_of_current_medication___6, "yes"))) %>%
-  mutate(n_current_schmerzmittel = sum(str_count(type_of_current_medication___7, "yes"))) %>%
-  mutate(n_current_antibiotika = sum(str_count(type_of_current_medication___8, "yes"))) %>%
-  mutate(n_current_hormone = sum(str_count(type_of_current_medication___9, "yes"))) %>%
-  mutate(n_current_andere = sum(str_count(type_of_current_medication___10, "yes")))
-
+get_redcap() %>%
+  filter(point_of_research == "T1") %>% 
+  dplyr::select(participant_id, storage_name,point_of_research, current_antidepressants_preparation, type_of_current_medication___1, type_of_current_medication___2, type_of_current_medication___3, type_of_current_medication___4, type_of_current_medication___5) %>%
+  rename(current_antidepressants = type_of_current_medication___1)%>%
+  rename(current_neuroleptic = type_of_current_medication___2)%>%
+  rename(current_stimulantien_MPH = type_of_current_medication___3)%>%
+  rename(current_mood_stabilizers = type_of_current_medication___4)%>%
+  rename(current_benzodiazepine = type_of_current_medication___5) %>%
+  filter(!current_neuroleptic == "Checked") %>%
+  group_by(participant_id) %>%
+  slice_head(n = 1) %>%
+  ungroup() %>%
+  full_join(redcap.medical) -> redcap.medical 
 ```
-*HC haben im sample keine Comorbiditäten, BMI liegt zwischen 17,5 und 28 und nehmen keine psychoaktive Medikamente ein. Lediglich Antihistaminika, Hormone, Schmerzmittel und ähnliches*
 
-# how does T1 cohort look like?
+# 2. sMRI data 
+this is a three-step exclusion, startin with 1) exclude all subjects that are not labeled as "Einschluss" in variable "mriqc_smri_thal_summary", 2) exclude all subjects that are not labelled as 0, 1 in variable "mriqc_smri_summary", 3) exclude outliers via variable "outliersum = n_outliers_volume_2.698sd + n_outliers_symmetry_2.698sd". This variable is generated as the sum from volume and symmetry outliers that are imported via file "thal_subcortical_QC.csv" in the data folder.
+
 ```{r}
-redcap_T1 <- get_redcap() %>%
-  filter(point_of_research %in% "T1")
-
-T1_exclusion <- redcap_T1 %>%
-  filter(bmi_at_date_of_research < 17.5) 
-
-T1_exclusion.SSRI <- T1_exclusion %>%
-  dplyr::select(storage_name,participant_id, age_at_date_of_research, current_medication,type_of_current_medication___1, psychiatric_disorders) %>%
-  mutate_all(funs(str_replace(., "Checked", "yes"))) %>%
-  mutate_all(funs(str_replace(., "Unchecked", "no"))) %>%
-  mutate_all(funs(str_replace(., "unbekannt", NA_character_))) %>%
-  filter(type_of_current_medication___1 == "no")
-
-T1_exclusion.comorb <- T1_exclusion %>%
-  filter(psychiatric_disorders == "nein")
-
-T1_exclusion.comorb.SSRI <- T1_exclusion.SSRI %>%
-  filter(psychiatric_disorders == "nein")
-
-T1_exclusion.medication <- T1_exclusion %>%
-  dplyr::select(participant_id,point_of_research,current_antidepressants_preparation,type_of_current_medication___1, type_of_current_medication___2, type_of_current_medication___3, type_of_current_medication___4, type_of_current_medication___5, type_of_current_medication___6, type_of_current_medication___7, type_of_current_medication___8, type_of_current_medication___9, type_of_current_medication___10, current_other_medication_preparation)%>%
-  filter_all(any_vars(str_detect(., "Checked")))%>%
-  mutate_all(funs(str_replace(., "Checked", "yes")))%>%
-  mutate_all(funs(str_replace(., "Unchecked", "no")))%>%
-  mutate_all(funs(str_replace(., "unbekannt", NA_character_)))%>%
-  mutate(n_current_antidepressants = sum(str_count(type_of_current_medication___1, "yes"))) %>%
-  mutate(n_current_neuroleptic = sum(str_count(type_of_current_medication___2, "yes")))%>%
-  mutate(n_current_stimulantien_MPH = sum(str_count(type_of_current_medication___3, "yes"))) %>%
-  mutate(n_current_mood_stabilizers = sum(str_count(type_of_current_medication___4, "yes"))) %>%
-  mutate(n_current_benzodiazepine = sum(str_count(type_of_current_medication___5, "yes"))) %>%
-  mutate(n_current_antihistaminika = sum(str_count(type_of_current_medication___6, "yes"))) %>%
-  mutate(n_current_schmerzmittel = sum(str_count(type_of_current_medication___7, "yes"))) %>%
-  mutate(n_current_antibiotika = sum(str_count(type_of_current_medication___8, "yes"))) %>%
-  mutate(n_current_hormone = sum(str_count(type_of_current_medication___9, "yes"))) %>%
-  mutate(n_current_andere = sum(str_count(type_of_current_medication___10, "yes")))
 
 ```
-*eine Probandin nahm Neuroleptika ein (164-10-580-1) und wird daher ausgeschlossen. SSRI sind ok: 7 Probandinnen nahmen zum Assessment SSRI ein*
+
+# 3. BMI(-SDS) exclusion
+in this step we exclude high and low BMI for HC: >28 and <17.5 (>= 18 years of age) are excluded. If participants are ouside this range, age has to be checked. If they are unter 18, get BMI-SDS for this age. If at least 18, the subject must be excluded. Same is for T1: subjects must have a max BMI of 17.5, if more and younger than 18: check BMI-SDS. John already checked affected subjects (see code below).
+
+```{r}
+
+```
+
+*8. get matched sample*
+
+```{r}
+
+```
+
+
+
+
 
 
 
@@ -266,49 +254,10 @@ sample <- T1_exclusion %>%
 stopifnot(nrow(sample) == 340)
 ```
 
- 
 
-# sample characteristics
-```{r}
-sample_HC_medication <- sample %>%
-  filter(point_of_research %in% "HCW") %>%
-    dplyr::select(participant_id,point_of_research,current_antidepressants_preparation,type_of_current_medication___1, type_of_current_medication___2, type_of_current_medication___3, type_of_current_medication___4, type_of_current_medication___5, type_of_current_medication___6, type_of_current_medication___7, type_of_current_medication___8, type_of_current_medication___9, type_of_current_medication___10, current_other_medication_preparation)%>%
-  filter_all(any_vars(str_detect(., "Checked")))%>%
-  mutate_all(funs(str_replace(., "Checked", "yes")))%>%
-  mutate_all(funs(str_replace(., "Unchecked", "no")))%>%
-  mutate_all(funs(str_replace(., "unbekannt", NA_character_)))%>%
-  mutate(n_current_antidepressants = sum(str_count(type_of_current_medication___1, "yes"))) %>%
-  mutate(n_current_neuroleptic = sum(str_count(type_of_current_medication___2, "yes")))%>%
-  mutate(n_current_stimulantien_MPH = sum(str_count(type_of_current_medication___3, "yes"))) %>%
-  mutate(n_current_mood_stabilizers = sum(str_count(type_of_current_medication___4, "yes"))) %>%
-  mutate(n_current_benzodiazepine = sum(str_count(type_of_current_medication___5, "yes"))) %>%
-  mutate(n_current_antihistaminika = sum(str_count(type_of_current_medication___6, "yes"))) %>%
-  mutate(n_current_schmerzmittel = sum(str_count(type_of_current_medication___7, "yes"))) %>%
-  mutate(n_current_antibiotika = sum(str_count(type_of_current_medication___8, "yes"))) %>%
-  mutate(n_current_hormone = sum(str_count(type_of_current_medication___9, "yes"))) %>%
-  mutate(n_current_andere = sum(str_count(type_of_current_medication___10, "yes")))
-
-
-sample_T1_medication <- sample %>%
-  filter(point_of_research %in% "T1") %>%
-    dplyr::select(participant_id,point_of_research,current_antidepressants_preparation,type_of_current_medication___1, type_of_current_medication___2, type_of_current_medication___3, type_of_current_medication___4, type_of_current_medication___5, type_of_current_medication___6, type_of_current_medication___7, type_of_current_medication___8, type_of_current_medication___9, type_of_current_medication___10, current_other_medication_preparation)%>%
-  filter_all(any_vars(str_detect(., "Checked")))%>%
-  mutate_all(funs(str_replace(., "Checked", "yes")))%>%
-  mutate_all(funs(str_replace(., "Unchecked", "no")))%>%
-  mutate_all(funs(str_replace(., "unbekannt", NA_character_)))%>%
-  mutate(n_current_antidepressants = sum(str_count(type_of_current_medication___1, "yes"))) %>%
-  mutate(n_current_neuroleptic = sum(str_count(type_of_current_medication___2, "yes")))%>%
-  mutate(n_current_stimulantien_MPH = sum(str_count(type_of_current_medication___3, "yes"))) %>%
-  mutate(n_current_mood_stabilizers = sum(str_count(type_of_current_medication___4, "yes"))) %>%
-  mutate(n_current_benzodiazepine = sum(str_count(type_of_current_medication___5, "yes"))) %>%
-  mutate(n_current_antihistaminika = sum(str_count(type_of_current_medication___6, "yes"))) %>%
-  mutate(n_current_schmerzmittel = sum(str_count(type_of_current_medication___7, "yes"))) %>%
-  mutate(n_current_antibiotika = sum(str_count(type_of_current_medication___8, "yes"))) %>%
-  mutate(n_current_hormone = sum(str_count(type_of_current_medication___9, "yes"))) %>%
-  mutate(n_current_andere = sum(str_count(type_of_current_medication___10, "yes")))
 
 ### 64-10-372-1, 64-10-200-1, 64-10-429-1
-
+```{r}
 sample_t1_disorders <- sample %>%
   filter(point_of_research %in% "T1") %>%
   filter(psychiatric_disorders == "ja") %>%

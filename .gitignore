@@ -6,4 +6,5 @@
 *.tif
 *.jpg
 .DS_Store
-.tables
+/figures
+/tables
