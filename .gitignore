@@ -8,3 +8,5 @@
 .DS_Store
 /figures
 /tables
+.FG_smri-Thalamus.Rproj
+*.Rproj
