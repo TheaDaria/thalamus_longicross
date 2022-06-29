@@ -6,3 +6,5 @@ the code for our longi- and cross-sectional analysis of thalamus nuclei
 - Adding my cross R-code (really messy and not complete... especially the sample generation code is not finished... ) for colab with John.
 - Adding John as colaborator. HF with this mess
 - adding one old amygdala-code from Marie Wronsky (for comparison) "amyg_hippo_new"
+- adding new amygdala code from Marie Wronsky "amy_longi.Rmd"
+- pushing new file of Johns code "thal_longi_JS"
