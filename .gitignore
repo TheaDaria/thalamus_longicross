@@ -11,3 +11,5 @@
 *.Rproj
 *.pptx
 /presentations
+/cache
+/data
