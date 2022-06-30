@@ -6,6 +6,9 @@ the code for our longi- and cross-sectional analysis of thalamus nuclei
 - pushed edited get_sample code (cross)... just 1 step until sample matching, may happen today :) 
 - deleted .pptx from github
 - edited .gitignore to ignore .pptx 
+- deleted redcap-data from github
+- edited .gitignore to ignore folders with redcap data
+
 
 29.06.22 JS
 
