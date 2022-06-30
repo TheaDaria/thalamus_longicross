@@ -286,7 +286,7 @@ get_redcap() %>%
   right_join(med.QC.exclusion, by = c("participant_id", "storage_name","point_of_research")) %>%
   filter(point_of_research %in% "T1") %>%  # 141 subjects (rows)
   dplyr::select(participant_id, storage_name, point_of_research, bmi_at_date_of_research, age_at_date_of_research) %>%
-  arrange(desc(bmi_at_date_of_research))
+  arrange(desc(bmi_at_date_of_research)) 
 
 ```
 only one HWC was excluded in this step. subject was over 18 with a BMI of 28.65. No T1 was excluded in this step.
