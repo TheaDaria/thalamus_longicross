@@ -295,7 +295,7 @@ ancova.whole_fdr <- p.combiadjust %>%
   filter(main_glm == "GLM 2") %>%
   dplyr::select(hemi_region, p.adj.combi, adj.signif.combi) %>%
   full_join(ancova.whole, by="hemi_region")%>%
-  mutate(is.signif.combi = ifelse(p.adj.combi<0.05, TRUE, FALSE)) %>%
+  mutate(is.signif.combi = ifelse(p.adj.combi<0.05, TRUE, FALSE)) %>% #why compute this?? #just base follow up analysis on one main GLM
   mutate(p.adj.combi = formatC(p.adj.combi, format="f", digits=4)) %>%
   dplyr::select(-c(is.signif))
 ```
@@ -448,7 +448,7 @@ cordata.rlm1 <- ancova.etiv_fdr %>%
                                                    'lh_PuL','rh_PuL',
                                                    'lh_PuI','rh_PuI'))) %>%
   filter(point_of_research %in% "T1") %>%
-  filter(is.signif.combi == TRUE) %>%
+  filter(is.signif.combi == TRUE) %>% #JS: just base on one main GLM?
   # filter(region != "Whole_thalamus") %>%
   left_join(sample_regression, by="storage_name") %>% 
   dplyr::select(storage_name, 
