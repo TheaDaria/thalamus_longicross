@@ -65,6 +65,7 @@ library(sjstats) # for effect size statistics
 # library(RColorBrewer) # color tool/palettes for plotting
 # library(captioner) # support for numbering figure and table captions (alternative to bookdown)
 library(sqldf)
+library(webshot)
 ```
 
 # Statistics for thalamus and thalamic nuclei

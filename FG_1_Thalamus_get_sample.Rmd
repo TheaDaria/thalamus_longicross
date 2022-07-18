@@ -44,6 +44,7 @@ library(sfsmisc)
 library(scales)
 library(sjstats)
 library(sqldf)
+library(optmatch)
 ```
 
 # Vorbereitungen
@@ -203,7 +204,9 @@ get_redcap() %>%
   rename(current_benzodiazepine = type_of_current_medication___5) %>%
   filter(!current_neuroleptic == "Checked") %>% # 380 observations (rows)
   full_join(redcap.medical.exclusion) -> redcap.medical.exclusion # 905 subjects (rows) T1 + HC
+
 ```
+
 
 # 2. sMRI data 
 this is a three-step exclusion, starting with 1) exclude all subjects that are not labeled as "Einschluss" in variable "mriqc_smri_thal_summary", 2) exclude all subjects that are not labelled as 0, 1 in variable "mriqc_smri_summary", 3) exclude outliers via variable "thal_outliersum = n_outliers_volume_2.698sd + n_outliers_symmetry_2.698sd". This variable is generated as the sum from volume and symmetry outliers that are imported via file "thal_subcortical_QC.csv" in the data folder.
@@ -223,37 +226,38 @@ step 1 - 3 of smri QC exclusion
 # 1) exclude all subjects that are not labeled as "Einschluss" in variable "mriqc_smri_thal_summary"
 
 QC.exclusion <- get_thal_QC() %>% # 987 observations (rows)
-  filter(mriqc_smri_thal_summary == 1) %>% 
-  # "1" means this scan was rated as "Einschluss" in thalamus substructure QC
+  filter(mriqc_smri_thal_summary == 1) %>%  # "1" means this scan was rated as "Einschluss" in thalamus substructure QC
   mutate(thal_outliersum = n_outliers_volume_2.698sd + n_outliers_symmetry_2.698sd) %>% # generating akkumulated outliers to find the scan with the least outliers for further analyses
-  mutate(mriqc_smri_summary = ifelse(mriqc_smri_summary %in% c(0,1), 1, 2)) %>% # general QC ratings 0 and 1 are not distinguished (good quality!), everything else will be excluded in a later step
   dplyr::select(storage_name, participant_id, mriqc_smri_summary, thal_outliersum) # 913 observations (rows)
 
 
-# 2) exclude all subjects that are not labelled as 0, 1 in variable "mriqc_smri_summary". 
+# 2) exclude all subjects that are not labelled as 0 or 1 in variable "mriqc_smri_summary". 
 # Variable was adjusted: 0 and 1 are now "1", the rest is rated as "2"
 
 QC.exclusion %>% # 913 observations (rows)
+  mutate(mriqc_smri_summary = ifelse(mriqc_smri_summary %in% c(0,1), 1, 2)) %>% # general QC ratings 0 and 1 are not distinguished (good quality!), everything else will be excluded in a later step
   filter(mriqc_smri_summary == "1") -> QC.exclusion # 883 observations (rows)
-
-
-# 3) exclude outliers via variable "thal_outliersum = n_outliers_volume_2.698sd + n_outliers_symmetry_2.698sd". 
-# Observations are grouped by ID and outliersums are arranged in ascending order. 
-# Slicing and keeping only the head will provide only one scan for each subject with the least outliersum in thalamic nuclei. 
-
-QC.exclusion %>% # 883 observations (rows)
-  group_by(participant_id) %>%
-  arrange(thal_outliersum, mriqc_smri_summary, .by_group = TRUE) %>% 
-  slice_head(n = 1) %>%
-  ungroup() -> QC.exclusion # 538 observations (rows)
-
 ```
+
 
 only the scans that are included will be matched with the subjects that are included via redcap medical inclusion criteria.
 ```{r}
 med.QC.exclusion <- QC.exclusion %>%
   inner_join(redcap.medical.exclusion, by = c("storage_name", "participant_id")) %>%
-  dplyr::select(c(participant_id, storage_name, point_of_research, thal_outliersum)) # 404 observations (rows)
+  dplyr::select(c(participant_id, storage_name, point_of_research, thal_outliersum, mriqc_smri_summary)) # 573 observations (rows)
+```
+after joining both data frames we have 363 HC entries and 210 T1 entries
+
+```{r}
+# 3) exclude outliers via variable "thal_outliersum = n_outliers_volume_2.698sd + n_outliers_symmetry_2.698sd". 
+# Observations are grouped by ID and outliersums are arranged in ascending order. 
+# Slicing and keeping only the head will provide only one scan for each subject with the least outliersum in thalamic nuclei. 
+
+exclusion.sample <- med.QC.exclusion %>% # 883 observations (rows)
+  group_by(participant_id) %>%
+  arrange(thal_outliersum, mriqc_smri_summary, .by_group = TRUE) %>% 
+  slice_head(n = 1) %>%
+  ungroup() # 427 observations (rows)
 ```
 
 
@@ -262,10 +266,10 @@ in this step we exclude high and low BMI for HC: >28 and <17.5 (>= 18 years of a
 
 ```{r}
 bmi.exclusion <- get_redcap() %>%
-  right_join(med.QC.exclusion, by = c("participant_id", "storage_name","point_of_research")) %>%
-  filter(point_of_research %in% "HCW")%>%  # 263 subjects (rows)
+  right_join(exclusion.sample, by = c("participant_id", "storage_name","point_of_research")) %>%
+  filter(point_of_research %in% "HCW")%>% 
+  dplyr::select(participant_id, storage_name, point_of_research, bmi_at_date_of_research, age_at_date_of_research) %>% # 
   filter(bmi_at_date_of_research >= 28 | bmi_at_date_of_research < 17.5) %>%
-  dplyr::select(participant_id, storage_name, point_of_research, bmi_at_date_of_research, age_at_date_of_research) %>%
   mutate(BMI_percentile=case_when(str_detect(storage_name, "64-23-079-1_mop") ~ 13, # these HCW were identified in a former step as out-of-range BMI but subjects are underaged. So BMI percentiles were needed to check whether they can be included in further analysis. BMI percentiles were checked via percentile-app manually
                                          str_detect(storage_name, "64-23-295-1_suber") ~ 21,
                                          str_detect(storage_name, "64-23-319-1_suber") ~ 24,
@@ -273,20 +277,21 @@ bmi.exclusion <- get_redcap() %>%
                                          str_detect(storage_name, "64-23-430-1_conni") ~ 23,
                                          str_detect(storage_name, "64-23-437-1_conni") ~ 15)) %>%
   dplyr::select(-c(bmi_at_date_of_research, age_at_date_of_research)) %>%
-  right_join(med.QC.exclusion, by = c("participant_id", "storage_name","point_of_research")) %>%
+  right_join(exclusion.sample, by = c("participant_id", "storage_name","point_of_research")) %>%
   left_join(get_redcap(), by = c("participant_id", "storage_name","point_of_research")) %>%
-  dplyr::select(participant_id, storage_name, point_of_research, bmi_at_date_of_research, age_at_date_of_research, BMI_percentile) %>% # 404 subjects (rows)
-  filter(! c(bmi_at_date_of_research >= 28 & age_at_date_of_research >= 18)) # 403 subjects (rows)
+  dplyr::select(participant_id, storage_name, point_of_research, bmi_at_date_of_research, age_at_date_of_research, BMI_percentile) %>% # 427 subjects (rows)
+  filter(! c(bmi_at_date_of_research >= 28 & age_at_date_of_research >= 18)) # 426 subjects (rows)
 
 # since BMI percentile exclusion threshold is <10, all underaged participants with out-of-range BMI can be included
 # one over 18 year old HCW must be excluded: 64-23-205-1_suber; BMI: 28.65983; age: 21.2
 
-
 get_redcap() %>%
-  right_join(med.QC.exclusion, by = c("participant_id", "storage_name","point_of_research")) %>%
+  right_join(exclusion.sample, by = c("participant_id", "storage_name","point_of_research")) %>%
   filter(point_of_research %in% "T1") %>%  # 141 subjects (rows)
   dplyr::select(participant_id, storage_name, point_of_research, bmi_at_date_of_research, age_at_date_of_research) %>%
   arrange(desc(bmi_at_date_of_research)) 
+
+# this step controls for T1 that are not in the BMI / percentile window. All T1 are can be included, the highes BMI is 14.4 the lowest is 13.1
 
 ```
 only one HWC was excluded in this step. subject was over 18 with a BMI of 28.65. No T1 was excluded in this step.
@@ -295,21 +300,9 @@ only one HWC was excluded in this step. subject was over 18 with a BMI of 28.65.
 *8. get matched sample*
 
 ```{r}
-
-```
-
-
-
-
-
-
-
-# get matched sample to work with
-```{r}
-sample <- T1_exclusion %>% 
-  rbind(HC_exclusion) %>%
-  filter(mriqc_smri_thal_summary == "Einschluss") %>%
-  filter(type_of_current_medication___2 == "Unchecked")%>% # exclude neuroleptika
+ sample <- bmi.exclusion %>% 
+  dplyr::select(c(participant_id, storage_name, point_of_research)) %>%
+  left_join(get_redcap(),by = c("participant_id", "storage_name","point_of_research"))%>%
   mutate(point_of_research_n = dplyr::recode(point_of_research,
                                     "HCW" = 0,
                                     "T1" = 1)) %>% 
@@ -317,53 +310,10 @@ sample <- T1_exclusion %>%
   slice(1) %>%
   ungroup() %>%
   matchit(point_of_research_n ~ age_at_date_of_research, data = ., method = "optimal", ratio = 1) %>%
-  match.data()
+  match.data() # 328 entries / subjects after matching (164 each group)
 
-stopifnot(nrow(sample) == 340)
+#stopifnot(nrow(sample) == 340)
 ```
-
-
-
-### 64-10-372-1, 64-10-200-1, 64-10-429-1
-```{r}
-sample_t1_disorders <- sample %>%
-  filter(point_of_research %in% "T1") %>%
-  filter(psychiatric_disorders == "ja") %>%
-  dplyr::select(participant_id,point_of_research,psychiatric_disorders,
-                                    depressive_disorders, 
-                                    obsessivecompulsive_disorders, 
-                                    anxiety_disorders, 
-                                    addiction, 
-                                    ptsd, 
-                                    tic_tourette,
-                                    conduct_disorder,
-                                    defiant_behaviour,
-                                    adaption_disorder,
-                                    psychosis,
-                                    attention_deficit_hyperactivity_disorder,
-                                    personality_disorders,
-                                    developmental_disorders,
-                                    other_psychiatric_disorders,
-                                    spec_other_psychiatric_disorders) %>%
-  mutate_all(funs(str_replace(., "unbekannt", NA_character_)))%>%
-  mutate(n_current_depressive_disorders = sum(str_count(depressive_disorders, "ja"))) %>%
-  mutate(n_current_obsessivecompulsive_disorders = sum(str_count(obsessivecompulsive_disorders, "ja")))%>%
-  mutate(n_current_anxiety_disorders = sum(str_count(anxiety_disorders, "ja"))) %>%
-  mutate(n_current_addiction = sum(str_count(addiction, "ja"))) %>%
-  mutate(n_current_ptsde = sum(str_count(ptsd, "ja"))) %>%
-  mutate(n_current_conduct_disorder = sum(str_count(conduct_disorder, "ja"))) %>%
-  mutate(n_current_defiant_behaviour = sum(str_count(defiant_behaviour, "ja"))) %>%
-  mutate(n_current_adaption_disorder = sum(str_count(adaption_disorder, "ja"))) %>%
-  mutate(n_current_psychosis = sum(str_count(psychosis, "ja"))) %>%
-  mutate(n_current_adhd = sum(str_count(attention_deficit_hyperactivity_disorder, "ja"))) %>%
-  mutate(n_current_personality_disorders = sum(str_count(personality_disorders, "ja"))) %>%
-  mutate(n_current_developmental_disorders = sum(str_count(developmental_disorders, "ja"))) %>%
-  mutate(n_current_other = sum(str_count(other_psychiatric_disorders, "ja"))) %>%
-  mutate(n_current_spec_other = sum(str_count(spec_other_psychiatric_disorders, "ja")))
-  
-```
-
-
 
 
 *9. getting FS data for sample*
