@@ -17,7 +17,22 @@ output:
     df_print: default
 ---
 
+```{r}
+a <- read_csv("data/redcap_do_not_delete/redcap.csv", col_types = cols()) 
+a$participant_id = substr(a$participant_id,1,9)
+write.csv(a,"data/redcap_do_not_delete/redcap_id.csv", row.names = FALSE)
+```
+
+
+```{r}
+a <- read_csv("data/thal_subcortical_QC.csv", col_types = cols()) 
+a$participant_id = substr(a$participant_id,1,9)
+write.csv(a,"data/thal_subcortical_QC_id.csv", row.names = FALSE)
+```
+
+
 ```{r library, results='hide', message=FALSE, warning=FALSE} 
+library(stringr) # zum string schneiden
 library(htmlTable)
 library(rmarkdown)
 library(Hmisc)
@@ -172,7 +187,7 @@ get_snr <- function(){
 ```{r redcapimport, results='hide', message=FALSE, warning=FALSE}
 
 get_redcap <-function(){
-  read_csv("data/redcap_do_not_delete/redcap.csv", col_types = cols())
+  read_csv("data/redcap_do_not_delete/redcap_id.csv", col_types = cols())
 }  %>%
   filter(!str_detect(storage_name, "atd" )) %>% # exclude atd study arm
   filter(!str_detect(storage_name, "^25" ))
@@ -214,7 +229,7 @@ this is a three-step exclusion, starting with 1) exclude all subjects that are n
 this function reads a csv that stores QC information
 ```{r}
 get_thal_QC <-function(){
-  read_csv("data/thal_subcortical_QC.csv", col_types = cols())
+  read_csv("data/thal_subcortical_QC_id.csv", col_types = cols())
 }  %>%
   filter(!str_detect(storage_name, "atd" )) %>% # exclude atd study arm
   filter(!str_detect(storage_name, "^25" ))
@@ -237,6 +252,7 @@ QC.exclusion <- get_thal_QC() %>% # 987 observations (rows)
 QC.exclusion %>% # 913 observations (rows)
   mutate(mriqc_smri_summary = ifelse(mriqc_smri_summary %in% c(0,1), 1, 2)) %>% # general QC ratings 0 and 1 are not distinguished (good quality!), everything else will be excluded in a later step
   filter(mriqc_smri_summary == "1") -> QC.exclusion # 883 observations (rows)
+
 ```
 
 
@@ -257,7 +273,7 @@ exclusion.sample <- med.QC.exclusion %>% # 883 observations (rows)
   group_by(participant_id) %>%
   arrange(thal_outliersum, mriqc_smri_summary, .by_group = TRUE) %>% 
   slice_head(n = 1) %>%
-  ungroup() # 427 observations (rows)
+  ungroup() # 423 observations (rows)
 ```
 
 
@@ -280,7 +296,7 @@ bmi.exclusion <- get_redcap() %>%
   right_join(exclusion.sample, by = c("participant_id", "storage_name","point_of_research")) %>%
   left_join(get_redcap(), by = c("participant_id", "storage_name","point_of_research")) %>%
   dplyr::select(participant_id, storage_name, point_of_research, bmi_at_date_of_research, age_at_date_of_research, BMI_percentile) %>% # 427 subjects (rows)
-  filter(! c(bmi_at_date_of_research >= 28 & age_at_date_of_research >= 18)) # 426 subjects (rows)
+  filter(! c(bmi_at_date_of_research >= 28 & age_at_date_of_research >= 18)) # 422 subjects (rows)
 
 # since BMI percentile exclusion threshold is <10, all underaged participants with out-of-range BMI can be included
 # one over 18 year old HCW must be excluded: 64-23-205-1_suber; BMI: 28.65983; age: 21.2
@@ -310,7 +326,7 @@ only one HWC was excluded in this step. subject was over 18 with a BMI of 28.65.
   slice(1) %>%
   ungroup() %>%
   matchit(point_of_research_n ~ age_at_date_of_research, data = ., method = "optimal", ratio = 1) %>%
-  match.data() # 328 entries / subjects after matching (164 each group)
+  match.data() # 322 entries / subjects after matching (161 each group)
 
 #stopifnot(nrow(sample) == 340)
 ```
@@ -435,5 +451,58 @@ glmdata <- sample %>%
                            'VPL' = "Subregion",
                            'Whole_thalamus' = "Whole")) %>%
   dplyr::select(-c(region_recoded, analysis))
+
+# variables_grouper.glm <- c('lh_AV' = "Thalamus nuclei",
+#                            'lh_CL' = "Thalamus nuclei",
+#                            'lh_CM' = "Thalamus nuclei",
+#                            'lh_CeM' = "Thalamus nuclei",
+#                            'lh_L-Sg' = "Thalamus nuclei",
+#                            'lh_LD' = "Thalamus nuclei",
+#                            'lh_LGN' = "Thalamus nuclei",
+#                            'lh_LP' = "Thalamus nuclei",
+#                            'lh_MDl' = "Thalamus nuclei",
+#                            'lh_MDm' = "Thalamus nuclei",
+#                            'lh_MGN' = "Thalamus nuclei",
+#                            'lh_MV(Re)' = "Thalamus nuclei",
+#                            'lh_Pc' = "Thalamus nuclei",
+#                            'lh_Pf' = "Thalamus nuclei",
+#                            'lh_Pt' = "Thalamus nuclei",
+#                            'lh_PuA' = "Thalamus nuclei",
+#                            'lh_PuI' = "Thalamus nuclei",
+#                            'lh_PuL' = "Thalamus nuclei",
+#                            'lh_PuM' = "Thalamus nuclei",
+#                            'lh_VA' = "Thalamus nuclei",
+#                            'lh_VAmc' = "Thalamus nuclei",
+#                            'lh_VLa' = "Thalamus nuclei",
+#                            'lh_VLp' = "Thalamus nuclei",
+#                            'lh_VM' = "Thalamus nuclei",
+#                            'lh_VPL' = "Thalamus nuclei",
+#                            'lh_Whole_thalamus' = "Whole Thalamus",
+#                            'rh_AV' = "Thalamus nuclei",
+#                            'rh_CL' = "Thalamus nuclei",
+#                            'rh_CM' = "Thalamus nuclei",
+#                            'rh_CeM' = "Thalamus nuclei",
+#                            'rh_L-Sg' = "Thalamus nuclei",
+#                            'rh_LD' = "Thalamus nuclei",
+#                            'rh_LGN' = "Thalamus nuclei",
+#                            'rh_LP' = "Thalamus nuclei",
+#                            'rh_MDl' = "Thalamus nuclei",
+#                            'rh_MDm' = "Thalamus nuclei",
+#                            'rh_MGN' = "Thalamus nuclei",
+#                            'rh_MV(Re)' = "Thalamus nuclei",
+#                            'rh_Pc' = "Thalamus nuclei",
+#                            'rh_Pf' = "Thalamus nuclei",
+#                            'rh_Pt' = "Thalamus nuclei",
+#                            'rh_PuA' = "Thalamus nuclei",
+#                            'rh_PuI' = "Thalamus nuclei",
+#                            'rh_PuL' = "Thalamus nuclei",
+#                            'rh_PuM' = "Thalamus nuclei",
+#                            'rh_VA' = "Thalamus nuclei",
+#                            'rh_VAmc' = "Thalamus nuclei",
+#                            'rh_VLa' = "Thalamus nuclei",
+#                            'rh_VLp' = "Thalamus nuclei",
+#                            'rh_VM' = "Thalamus nuclei",
+#                            'rh_VPL' = "Thalamus nuclei",
+#                            'rh_Whole_thalamus' = "Whole Thalamus")
 ```
 

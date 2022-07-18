@@ -20,10 +20,10 @@ output:
 ```{r library, results='hide', message=FALSE, warning=FALSE} 
 # library(devtools) # for development versions on GitHub
 library(htmlTable)
-#library(magick)
+library(magick)
 library(rmarkdown)
 library(Hmisc)
-# library(Rcmdr)
+library(Rcmdr)
 library(dplyr)
 library(psych)
 library(pastecs)
@@ -32,40 +32,41 @@ library(tidyverse)
 library(ggplot2) # for data visualization (plotting)
 library(car) # for statistical models (ANCOVA with type III errors), dummy coding
 library(MatchIt) # for propensity (e.g. age, IQ) matching
-# library(purrr)  # for applying functions and working with lists (e.g. map(), reduce(), transpose())
-# library(stringr) # for string manipulation (e.g. str_detect(), str_extract(), str_subset(); string pattern - regular expressions)
-# library(forcats) # for dealing with factors (e.g. reordering)
+library(purrr)  # for applying functions and working with lists (e.g. map(), reduce(), transpose())
+library(stringr) # for string manipulation (e.g. str_detect(), str_extract(), str_subset(); string pattern - regular expressions)
+library(forcats) # for dealing with factors (e.g. reordering)
 library(ggforce) # extends functionality of ggplot2 (e.g. spreads boxplot facets (facet_wrap) over multiple pages)
 library(cowplot) # extends functionality of ggplot2 (e.g. create raincloud plots)
 # library(PupillometryR) # for raincloud (flat violin) plots
 library(ggsci) # alternative color tool/palettes for plotting (scientific journal style)
 library(ggpubr) # extends functionality of ggplot2 (e.g. editing options for publication)
 library(ggsignif) # for adding significance brackets and labels to ggplots (better compatible with geom_boxplot() than ggpubr)
-# library(stargazer) # for creating aesthetic table outputs to summarize analyses
+library(stargazer) # for creating aesthetic table outputs to summarize analyses
 library(kableExtra) # for creating kables (customized tables in RMarkdown output with styling options)
 library(bookdown) # support for numbering figure and table captions
 library(rstatix) # for statistical tests (in combination with dplyr/piping and plotting) and summary statistics
-# library(psych) # additional statistic options (e.g. correlation matrix, partial correlations)
-# library(lme4) # for linear mixed modelling
+library(psych) # additional statistic options (e.g. correlation matrix, partial correlations)
+library(lme4) # for linear mixed modelling
 library(MASS) # for robust linear model
 library(broom) # tidy test output, e.g. of GLM
 library(emmeans) # for estimated marginal means (EMM) (covariate-adjusted means in ANCOVA)
 library(sfsmisc) # for p values of robust regression analyses
-# library(broom.mixed) # tidy mixed model
+library(broom.mixed) # tidy mixed model
 library(scales) # for scale and percentage formatting (optional)
-# library(corrplot) # generate correlation matrix/visualization
-# library(ppcor) # for partial correlations
-# library(effectsize) # for effect size statistics (e.g. eta squared, Cohen's d)
+library(corrplot) # generate correlation matrix/visualization
+library(ppcor) # for partial correlations
+library(effectsize) # for effect size statistics (e.g. eta squared, Cohen's d)
 library(sjstats) # for effect size statistics
-# library(pwr) # basic functions for power analysis
-# library(broom)
-# #library(matlib) # for Gram-Schmidt Orthogonalization of a Matrix
-# library(tidystats) # make lists and dataframes out of statistical test results
-# library(reshape2) # for transposing/melting data (can also be done with dplyr)
-# library(RColorBrewer) # color tool/palettes for plotting
-# library(captioner) # support for numbering figure and table captions (alternative to bookdown)
+library(pwr) # basic functions for power analysis
+library(broom)
+#library(matlib) # for Gram-Schmidt Orthogonalization of a Matrix
+library(tidystats) # make lists and dataframes out of statistical test results
+library(reshape2) # for transposing/melting data (can also be done with dplyr)
+library(RColorBrewer) # color tool/palettes for plotting
+library(captioner) # support for numbering figure and table captions (alternative to bookdown)
 library(sqldf)
 library(webshot)
+library(knitr)
 ```
 
 # Statistics for thalamus and thalamic nuclei
@@ -87,7 +88,8 @@ demographics <- glmdata %>%
                 resultquest_edi2_iw,
                 resultquest_scl90r_skazwang,
                 research_blood_results_leptin, 
-                e_tiv)
+                e_tiv,
+                subcort_gray)
   #mutate(edi_core = (resultquest_edi2_ss + resultquest_edi2_uk + resultquest_edi2_b)/3)
 
 labeller.function <- function(x) { # labels in output tables (no underscores)
@@ -102,8 +104,8 @@ labeller.function <- function(x) { # labels in output tables (no underscores)
                 "resultquest_edi2_iw" = "EDI-2 Interoceptive Awareness",
                 "resultquest_scl90r_skazwang" = "SCL-90-R Compulsiveness",
                 "research_blood_results_leptin" = "Leptin (µg/L)",
-                "e_tiv" = "eTIV"
-                #"subcort_gray" = "Subcortical GM",
+                "e_tiv" = "eTIV",
+                "subcort_gray" = "Subcortical GM"
                 #"resultquest_edi2_ss" = "EDI-2 drive for thinness",
                 #"resultquest_edi2_uk" = "EDI-2 body dissatisfaction",
                 #"resultquest_edi2_b" = "EDI-2 bulimia",
@@ -131,7 +133,8 @@ variables_grouper <- c(age_at_date_of_research = "Demographics and BMI",
                        resultquest_edi2_iw = "Symptoms",
                        resultquest_scl90r_skazwang = "Symptoms",
                        research_blood_results_leptin = "Hormone parameter",
-                       e_tiv = "Brain segmentation volumes")
+                       e_tiv = "Brain segmentation volumes",
+                       subcort_gray = "Subcortical GM")
 
          
 demographics_stats <- demographics%>%
@@ -146,7 +149,8 @@ demographics_stats <- demographics%>%
                              resultquest_edi2_iw,
                              resultquest_scl90r_skazwang,
                              research_blood_results_leptin, 
-                             e_tiv) %>%
+                             e_tiv,
+                             subcort_gray) %>%
   dplyr::select(point_of_research, variable, n, mean, sd) %>%
   mutate(variable = factor(variable, levels=c("age_at_date_of_research", 
                                               "bmi_at_date_of_research",
@@ -158,7 +162,8 @@ demographics_stats <- demographics%>%
                                               "resultquest_edi2_iw",
                                               "resultquest_scl90r_skazwang" ,
                                               "research_blood_results_leptin", 
-                                              "e_tiv"))) %>%
+                                              "e_tiv",
+                                              "subcort_gray"))) %>%
   arrange(variable) %>% 
   mutate(variable = as.character(variable))
 
@@ -197,7 +202,8 @@ t.testdata <- demographics %>%
                 resultquest_edi2_iw,
                 resultquest_scl90r_skazwang, 
                 research_blood_results_leptin, 
-                e_tiv) %>%
+                e_tiv,
+                subcort_gray) %>%
   pivot_longer(-point_of_research, names_to = "variable", values_to = "value") %>%
   nest(data = -variable)
   
@@ -242,7 +248,7 @@ dem.table <- demographics_stats_HC_T1 %>%
   dplyr::select(variable.labelled, n_AN, mean_AN, SD_AN, n_HC, mean_HC, SD_HC, statistic, df, p.value) %>% # Method = Welch Two-Sample t-test (unequal variances)
   mutate(p.value = formatC(p.value, format="f", digits=3)) %>%
   mutate(p.value = ifelse(p.value<0.001, "<0.001", p.value))
-write.csv(dem.table,"tables/demographics_C.csv", row.names = FALSE)
+write.csv(dem.table,"tables/demographics.csv", row.names = FALSE)
 ```
 
 
@@ -274,7 +280,7 @@ dem <- demographics_stats_HC_T1 %>%
   kable_paper(full_width=FALSE, position="left", html_font="Arial", font_size="15") %>%
   add_header_above(c("", "n", "Sample"=2, "Analyses"=3), align="l") %>% 
   pack_rows(index = table(fct_inorder(t.testdatatable$variables_group))) %>%
-  save_kable(file="tables/thalamus_demographics_C.png", zoom=5)
+  save_kable(file="tables/thalamus_demographics.png", zoom=5)
 ```
 
 ### Thalamus nuclei - descriptive statistics
@@ -319,11 +325,12 @@ descrthalamus_join %>%
   unite("range_HC", c(min.y, max.y), sep = " – ", remove = FALSE, na.rm = FALSE) %>%
   dplyr::select(labeller, N, mean_sd_AN, range_AN, mean_sd_HC, range_HC) %>%
   knitr::kable(format = "html", digits=2, col.names = c("Raw volumes in mm^3", "acAN/HC", "Mean ± SD", "Range (min – max)", "Mean ± SD", "Range (min – max)"), align = "l", caption = "Descriptive statistics of raw thalamic (nuclei) volumes (whole thalamus and all nuclei) in acAN and age-matched HC") %>%
-  kable_paper(bootstrap_options="striped", full_width=FALSE, position="left", html_font="Arial",
-              font_size="15") %>%
+  kable_paper(bootstrap_options="striped", full_width=FALSE, position="left", html_font="Arial", font_size="15") %>%
   add_header_above(c("", "n", "acAN"=2, "HC"=2)) %>%
   add_header_above(c("","", "Sample"=4)) %>%
   pack_rows(index = table(fct_inorder(descrthalamus_join$region_type))) %>%
-  save_kable(file="tables/thalamus_volumes_C.png", zoom=4)
+  save_kable(file="tables/thalamus_volumes.png", zoom=4)
+
+
 ```
 
