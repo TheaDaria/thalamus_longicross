@@ -16,6 +16,27 @@ output:
     keep_md: yes
     df_print: default
 ---
+```{r library, results='hide', message=FALSE, warning=FALSE} 
+# library(stringr) # zum string schneiden
+# library(htmlTable)
+# library(rmarkdown)
+# library(Hmisc)
+# 
+# library(psych)
+# library(pastecs)
+# 
+# library(ggforce) # extends functionality of ggplot2 (e.g. spreads boxplot facets (facet_wrap) over multiple pages)
+# library(cowplot)
+# 
+# library(ggpubr) # extends functionality of ggplot2 (e.g. editing options for publication)
+# 
+# library(bookdown) # support for numbering figure and table captions
+# library(rstatix) 
+# 
+# library(sqldf)
+# library(optmatch)
+```
+
 ```{r}
 library(dplyr)
 library(readr) # loads read_csv
@@ -37,18 +58,22 @@ library(ggsci) # alternative color tool/palettes for plotting (scientific journa
 library(ggpubr) # extends functionality of ggplot2 (e.g. editing options for publication)
 library(MASS) # for robust linear model
 library(sfsmisc)
+
+# library(car) # for statistical models (ANCOVA with type III errors), dummy coding
 ```
 
 
-### GLM 1b - adjusted for eTIV and age
+### GLM 1c - adjusted for eTIV and age
 ```{r glmetiv, results="asis", message=FALSE, warning=FALSE}
 options(contrasts = c("contr.sum", "contr.poly"))
 
-ancova.etiv <- glmdata %>%
+ancova.etiv <- get_redcap() %>%
+  dplyr::select(storage_name,research_blood_results_leptin) %>%
+  right_join(glmdata, by = "storage_name" ) %>%
   mutate(point_of_research = relevel(as.factor(point_of_research), ref="HCW")) %>%
   nest(data = - c(region, hemi_region, labeller, group, hemi_group, group_labeller, region_type)) %>%
   mutate(
-    lm = map(data, ~ lm(measure ~ point_of_research + e_tiv + age_at_date_of_research, data = .x, na.action = na.omit)),
+    lm = map(data, ~ lm(measure ~ point_of_research + e_tiv + age_at_date_of_research + research_blood_results_leptin, data = .x, na.action = na.omit)),
     adj.means = map(lm, ~ emmeans(.x, "point_of_research")),
     tidymeans = map(adj.means, tidy),
     anova = map(lm, ~ car::Anova(.x, type="III", test.statistic="F")),
@@ -145,18 +170,20 @@ barplotarrange.etiv <- ggarrange(bp.whole.etiv,
 ```
 
 
-### GLM 2b - adjusted for whole thalamus
+### GLM 2c - adjusted for whole thalamus
 ```{r glmwhole, results="asis", message=FALSE, warning=FALSE}
-ancova.whole <- glmdata %>%
+ancova.whole <-  get_redcap() %>%
+  dplyr::select(storage_name,research_blood_results_leptin) %>%
+  right_join(glmdata, by = "storage_name" ) %>%
 filter(region %in% "Whole_thalamus") %>%
-  dplyr::select(storage_name, hemi, measure) %>%
+  dplyr::select(storage_name, hemi, measure, research_blood_results_leptin) %>%
   rename(whole_thalamus = measure) %>% 
   right_join(glmdata, by=c("storage_name", "hemi")) %>%
   filter(region != "Whole_thalamus") %>%
   mutate(point_of_research = relevel(as.factor(point_of_research), ref="HCW")) %>%
   nest(data = - c(hemi_region, labeller, region, group, hemi_group, group_labeller, region_type)) %>%
   mutate(
-    lm = map(data, ~ lm(measure ~ point_of_research + e_tiv + whole_thalamus + age_at_date_of_research, data = .x, na.action = na.omit)),
+    lm = map(data, ~ lm(measure ~ point_of_research + e_tiv + whole_thalamus + age_at_date_of_research + research_blood_results_leptin, data = .x, na.action = na.omit)),
     adj.means = map(lm, ~ emmeans(.x, "point_of_research")),
     tidymeans = map(adj.means, tidy),
     anova = map(lm, ~ car::Anova(.x, type="III", test.statistic="F")),
@@ -250,7 +277,7 @@ barplotarrange.whole <- ggarrange(plotlist=bp.nuclei.whole, ncol=5, nrow=5) %>%
 
 ### FDR correction ###########################################################################################################################
 
-### FDR corection for GLM 1b (etiv) and GLM 2b (etiv + whole thal)
+### FDR corection for GLM 1c (etiv) and GLM 2c (etiv + whole thal)
 ```{r padjustglm, results="asis", message=FALSE, warning=FALSE}
 p.adjust.1 <- ancova.etiv %>%
   filter(term %in% "point_of_research") %>%
@@ -290,7 +317,7 @@ ancova.whole_fdr <- p.combiadjust %>%
 ```
 
 
-### FDR corrected GLM 1b Bars
+### FDR corrected GLM 1c Bars
 ```{r etivplot, fig.cap="Barplots for GLMs, adjusted for eTIV and FDR", echo=TRUE, message=FALSE, warning=FALSE}
 
 for (Region in unique(bardata.etiv$region)) {
@@ -339,10 +366,10 @@ barplotarrange.etiv_fdr <- ggarrange(bp.whole.etiv_fdr,
 
 #barplotarrange.etiv_fdr
 
-ggsave(barplotarrange.etiv_fdr, filename="figures/barplots_glm_etiv_fdr_age.png", width=30, height=25, dpi=300)
+ggsave(barplotarrange.etiv_fdr, filename="figures/barplots_glm_etiv_fdr_age+leptin.png", width=30, height=25, dpi=300)
 ```
 
-### FDR corrected GLM 2b Bars
+### FDR corrected GLM 2c Bars
 ```{r wholeplot, fig.cap="Barplots for GLMs, adjusted for whole thalamus", echo=TRUE, message=FALSE, warning=FALSE}
 for (Region in unique(bardata.whole$region)) {
   
@@ -387,7 +414,7 @@ barplotarrange.whole_fdr <- ggarrange(plotlist=bp.nuclei.whole_fdr, ncol=5, nrow
 
 #barplotarrange.whole_fdr
 
-ggsave(barplotarrange.whole_fdr, filename="figures/barplots_glm_whole_fdr_age.png", width=25, height=25, dpi=300)
+ggsave(barplotarrange.whole_fdr, filename="figures/barplots_glm_whole_fdr_age+leptin.png", width=25, height=25, dpi=300)
 ```
 
 ### GLM 3 - adjusted for total subcortical gray matter volume
@@ -569,7 +596,7 @@ cordata.rlm1 <- ancova.etiv_fdr %>%
   mutate(hemi_region = as.character(hemi_region)) %>%
   ungroup()
 
-write.csv2(cordata.rlm1,"tables/RLM1+ZWANG_signinuclei_fromGLM+age.csv", row.names = FALSE)
+write.csv2(cordata.rlm1,"tables/RLM_signinuclei_age+leptin.csv", row.names = FALSE)
 
 
 # cordata.rlm1 %>%

@@ -405,7 +405,8 @@ ggsave(barplotarrange.whole_fdr, filename="figures/barplots_glm_whole_fdr.png", 
 ### Robust regression models ############# using only significant nuclei from GLM 1 & 2 ########################################################
 
 
-##RLM: etiv and age as covariables for predictor
+## RLM1: etiv and age as covariables for predictor, 
+## Predictor: ZWANG
 ```{r robustregressionnuclei, results="asis", message=FALSE, warning=FALSE}
 sample_regression <- sample %>%
 dplyr::select(storage_name, resultquest_scl90r_skazwang)
@@ -452,7 +453,7 @@ cordata.rlm1 <- ancova.etiv_fdr %>%
                 measure, 
                 resultquest_scl90r_skazwang) %>%
   pivot_longer(-c(storage_name, hemi_region, labeller, age_at_date_of_research, e_tiv, measure), 
-               names_to = "scale", values_to = "value") %>%
+               names_to = "scale", values_to = "value") #%>%
   nest(-c(hemi_region, labeller, scale)) %>%
   mutate(
     rlm = map(data, ~ rlm(value ~ measure + age_at_date_of_research + e_tiv, data=.x, na.action = na.omit)),
@@ -479,7 +480,7 @@ cordata.rlm1 <- ancova.etiv_fdr %>%
   # mutate(variables_group = dplyr::recode(hemi_region, !!!variables_grouper.glm, .default = "missing group")) %>%
   ungroup()
 
-write.csv(cordata.rlm1,"tables/correlation_zwang_RLM.csv", row.names = FALSE)
+write.csv(cordata.rlm1,"tables/RLM1+ZWANG_signinuclei_fromGLM.csv", row.names = FALSE)
 
 
 # cordata.rlm1 %>%
@@ -491,6 +492,86 @@ write.csv(cordata.rlm1,"tables/correlation_zwang_RLM.csv", row.names = FALSE)
 #   save_kable(file="tables/thalamus_RLM1_FDR.png", zoom=5)
 ```
 
+## RLM2: etiv and age as covariables for predictor, 
+## Predictor: ZWANG
+```{r robustregressionnuclei, results="asis", message=FALSE, warning=FALSE}
+sample_regression <- sample %>%
+dplyr::select(storage_name, resultquest_scl90r_skazwang)
+
+cordata.rlm1 <- ancova.etiv_fdr %>%
+  filter(term == "point_of_research") %>%
+  dplyr::select(hemi_region, is.signif.combi) %>%
+  right_join(glmdata, by="hemi_region") %>%
+  mutate(hemi_region = factor(hemi_region, levels=c('lh_Whole_thalamus','rh_Whole_thalamus',
+                                                   'lh_AV','rh_AV',
+                                                   'lh_LD','rh_LD',
+                                                   'lh_LP','rh_LP',
+                                                   'lh_VA','rh_VA',
+                                                   'lh_VAmc','rh_VAmc',
+                                                   'lh_VLa','rh_VLa',
+                                                   'lh_VLp','rh_VLp',
+                                                   'lh_VPL','rh_VPL',
+                                                   'lh_VM','rh_VM',
+                                                   'lh_CeM','rh_CeM',
+                                                   'lh_CL','rh_CL',
+                                                   'lh_Pc','rh_Pc',
+                                                   'lh_CM','rh_CM',
+                                                   'lh_Pf','rh_Pf',
+                                                   'lh_Pt','rh_Pt',
+                                                   'lh_MV(Re)','rh_MV(Re)',
+                                                   'lh_MDm','rh_MDm',
+                                                   'lh_MDl','rh_MDl',
+                                                   'lh_LGN','rh_LGN',
+                                                   'lh_MGN','rh_MGN',
+                                                   'lh_L-Sg','rh_L-Sg',
+                                                   'lh_PuA','rh_PuA',
+                                                   'lh_PuM','rh_PuM',
+                                                   'lh_PuL','rh_PuL',
+                                                   'lh_PuI','rh_PuI'))) %>%
+  filter(point_of_research %in% "T1") %>%
+  filter(is.signif.combi == TRUE) %>% #JS: just base on one main GLM?
+  filter(region != "Whole_thalamus") %>%
+  left_join(sample_regression, by="storage_name") %>% 
+  dplyr::select(storage_name, 
+                hemi_region, 
+                labeller, 
+                age_at_date_of_research, 
+                e_tiv, 
+                measure, 
+                resultquest_scl90r_skazwang) %>%
+  pivot_longer(-c(storage_name, hemi_region, labeller, age_at_date_of_research, e_tiv, measure), 
+               names_to = "scale", values_to = "value") #%>%
+  nest(-c(hemi_region, labeller, scale)) %>%
+  mutate(
+    rlm = map(data, ~ rlm(value ~ measure + age_at_date_of_research + e_tiv, data=.x, na.action = na.omit)),
+    tidyrlm = map(rlm, tidy),
+    tidyrlm = map(tidyrlm, ~ rename(.x, t.value = statistic)),
+    testrlm = map(rlm, ~ f.robftest(.x, var = "measure")),
+    tidytestrlm = map(testrlm, tidy),
+    tidytestrlm = map(tidytestrlm, ~ rename(.x, F.value = statistic)),
+    filterrlm = map(tidyrlm, ~ filter(.x, term %in% "measure"))) %>%
+  unnest(tidytestrlm, filterrlm) %>%
+  mutate(unadj.signif = as.character(asterisk_function(p.value))) %>%
+  mutate(p.adj = p.adjust(p.value, method="BH")) %>%
+  mutate(adj.signif = as.character(asterisk_function(p.adj))) %>%
+  dplyr::select(hemi_region, labeller, scale, t.value, p.value, unadj.signif, p.adj, adj.signif) %>%
+  mutate(p.value = formatC(p.value, format="f", digits=3)) %>%
+  mutate(p.adj = formatC(p.adj, format="f", digits=3)) %>% ## adjusted digits of adjusted p value.
+  mutate(t.value = formatC(t.value, format="f", digits=3)) %>% ## adjusted digits of adjusted t value.
+  nest(-c(hemi_region, labeller, scale)) %>%
+  group_by(hemi_region) %>%
+  pivot_wider(names_from = "scale", values_from = "data") %>%
+  unnest(resultquest_scl90r_skazwang)  %>%
+  arrange(hemi_region) %>%
+  mutate(hemi_region = as.character(hemi_region)) %>%
+  # mutate(variables_group = dplyr::recode(hemi_region, !!!variables_grouper.glm, .default = "missing group")) %>%
+  ungroup()
+
+write.csv(cordata.rlm1,"tables/RLM2+LEPTIN_signinuclei+fromGLM", row.names = FALSE)
+```
+
+
+```{r robustregressionnuclei, results="asis", message=FALSE, warning=FALSE}
 <!-- ## find relatively larger/smaller nuclei in AN and HC ######################################################## -->
 
 <!-- ## atrophy function -->

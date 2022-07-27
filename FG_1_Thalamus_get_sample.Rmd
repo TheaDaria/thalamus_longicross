@@ -31,36 +31,29 @@ write.csv(a,"data/thal_subcortical_QC_id.csv", row.names = FALSE)
 ```
 
 
-```{r library, results='hide', message=FALSE, warning=FALSE} 
-library(stringr) # zum string schneiden
-library(htmlTable)
-library(rmarkdown)
-library(Hmisc)
+```{r}
 library(dplyr)
-library(psych)
-library(pastecs)
-library(tidyr)
-library(tidyverse)
-library(ggplot2) # for data visualization (plotting)
-library(car) # for statistical models (ANCOVA with type III errors), dummy coding
-library(MatchIt)
-library(ggforce) # extends functionality of ggplot2 (e.g. spreads boxplot facets (facet_wrap) over multiple pages)
-library(cowplot)
+library(readr) # loads read_csv
+library(stringr) # loads str_detect
+library(optmatch) # for matchung function
+library(tidyr) # loads unite function
+library(forcats) # for dealing with factors (e.g. reordering)
+library(kableExtra) # for creating kables (customized tables in RMarkdown output with styling options)
+library(rstatix) # for statistical tests (in combination with dplyr/piping and plotting) and summary statistics
+library(purrr)
+library(emmeans)
+library(ggplot2)
+library(broom)
+library(sjstats)
+library(pwr)
+library(ggsignif)
+library(scales)
 library(ggsci) # alternative color tool/palettes for plotting (scientific journal style)
 library(ggpubr) # extends functionality of ggplot2 (e.g. editing options for publication)
-library(ggsignif)
-library(kableExtra) # for creating kables (customized tables in RMarkdown output with styling options)
-library(bookdown) # support for numbering figure and table captions
-library(rstatix) 
 library(MASS) # for robust linear model
-library(broom) # tidy test output, e.g. of GLM
-library(emmeans) # for estimated marginal means (EMM) (covariate-adjusted means in ANCOVA)
 library(sfsmisc)
-library(scales)
-library(sjstats)
-library(sqldf)
-library(optmatch)
 ```
+
 
 # Vorbereitungen
 *1. set path to taurus mountpoint*

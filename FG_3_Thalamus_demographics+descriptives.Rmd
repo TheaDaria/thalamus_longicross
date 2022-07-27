@@ -17,56 +17,80 @@ output:
     df_print: default
 ---
 
-```{r library, results='hide', message=FALSE, warning=FALSE} 
-# library(devtools) # for development versions on GitHub
-library(htmlTable)
-library(magick)
-library(rmarkdown)
-library(Hmisc)
-library(Rcmdr)
+```{r}
 library(dplyr)
-library(psych)
-library(pastecs)
-library(tidyr)
-library(tidyverse)
-library(ggplot2) # for data visualization (plotting)
-library(car) # for statistical models (ANCOVA with type III errors), dummy coding
-library(MatchIt) # for propensity (e.g. age, IQ) matching
-library(purrr)  # for applying functions and working with lists (e.g. map(), reduce(), transpose())
-library(stringr) # for string manipulation (e.g. str_detect(), str_extract(), str_subset(); string pattern - regular expressions)
+library(readr) # loads read_csv
+library(stringr) # loads str_detect
+library(optmatch) # for matchung function
+library(tidyr) # loads unite function
 library(forcats) # for dealing with factors (e.g. reordering)
-library(ggforce) # extends functionality of ggplot2 (e.g. spreads boxplot facets (facet_wrap) over multiple pages)
-library(cowplot) # extends functionality of ggplot2 (e.g. create raincloud plots)
-# library(PupillometryR) # for raincloud (flat violin) plots
+library(kableExtra) # for creating kables (customized tables in RMarkdown output with styling options)
+library(rstatix) # for statistical tests (in combination with dplyr/piping and plotting) and summary statistics
+library(purrr)
+library(emmeans)
+library(ggplot2)
+library(broom)
+library(sjstats)
+library(pwr)
+library(ggsignif)
+library(scales)
 library(ggsci) # alternative color tool/palettes for plotting (scientific journal style)
 library(ggpubr) # extends functionality of ggplot2 (e.g. editing options for publication)
-library(ggsignif) # for adding significance brackets and labels to ggplots (better compatible with geom_boxplot() than ggpubr)
-library(stargazer) # for creating aesthetic table outputs to summarize analyses
-library(kableExtra) # for creating kables (customized tables in RMarkdown output with styling options)
-library(bookdown) # support for numbering figure and table captions
-library(rstatix) # for statistical tests (in combination with dplyr/piping and plotting) and summary statistics
-library(psych) # additional statistic options (e.g. correlation matrix, partial correlations)
-library(lme4) # for linear mixed modelling
 library(MASS) # for robust linear model
-library(broom) # tidy test output, e.g. of GLM
-library(emmeans) # for estimated marginal means (EMM) (covariate-adjusted means in ANCOVA)
-library(sfsmisc) # for p values of robust regression analyses
-library(broom.mixed) # tidy mixed model
-library(scales) # for scale and percentage formatting (optional)
-library(corrplot) # generate correlation matrix/visualization
-library(ppcor) # for partial correlations
-library(effectsize) # for effect size statistics (e.g. eta squared, Cohen's d)
-library(sjstats) # for effect size statistics
-library(pwr) # basic functions for power analysis
-library(broom)
-#library(matlib) # for Gram-Schmidt Orthogonalization of a Matrix
-library(tidystats) # make lists and dataframes out of statistical test results
-library(reshape2) # for transposing/melting data (can also be done with dplyr)
-library(RColorBrewer) # color tool/palettes for plotting
-library(captioner) # support for numbering figure and table captions (alternative to bookdown)
-library(sqldf)
-library(webshot)
-library(knitr)
+library(sfsmisc)
+```
+
+
+```{r library, results='hide', message=FALSE, warning=FALSE} 
+# # library(devtools) # for development versions on GitHub
+# library(htmlTable)
+# library(magick)
+# library(rmarkdown)
+# library(Hmisc)
+# library(Rcmdr)
+# library(dplyr)
+# library(psych)
+# library(pastecs)
+# library(tidyr)
+# library(tidyverse)
+# library(ggplot2) # for data visualization (plotting)
+# library(car) # for statistical models (ANCOVA with type III errors), dummy coding
+# library(MatchIt) # for propensity (e.g. age, IQ) matching
+# library(purrr)  # for applying functions and working with lists (e.g. map(), reduce(), transpose())
+# library(stringr) # for string manipulation (e.g. str_detect(), str_extract(), str_subset(); string pattern - regular expressions)
+
+# library(ggforce) # extends functionality of ggplot2 (e.g. spreads boxplot facets (facet_wrap) over multiple pages)
+# library(cowplot) # extends functionality of ggplot2 (e.g. create raincloud plots)
+# # library(PupillometryR) # for raincloud (flat violin) plots
+# library(ggsci) # alternative color tool/palettes for plotting (scientific journal style)
+# library(ggpubr) # extends functionality of ggplot2 (e.g. editing options for publication)
+# library(ggsignif) # for adding significance brackets and labels to ggplots (better compatible with geom_boxplot() than ggpubr)
+# library(stargazer) # for creating aesthetic table outputs to summarize analyses
+
+# library(bookdown) # support for numbering figure and table captions
+
+# library(psych) # additional statistic options (e.g. correlation matrix, partial correlations)
+# library(lme4) # for linear mixed modelling
+# library(MASS) # for robust linear model
+# library(broom) # tidy test output, e.g. of GLM
+# library(emmeans) # for estimated marginal means (EMM) (covariate-adjusted means in ANCOVA)
+# library(sfsmisc) # for p values of robust regression analyses
+# library(broom.mixed) # tidy mixed model
+# library(scales) # for scale and percentage formatting (optional)
+# library(corrplot) # generate correlation matrix/visualization
+# library(ppcor) # for partial correlations
+# library(effectsize) # for effect size statistics (e.g. eta squared, Cohen's d)
+# library(sjstats) # for effect size statistics
+# library(pwr) # basic functions for power analysis
+# library(broom)
+# #library(matlib) # for Gram-Schmidt Orthogonalization of a Matrix
+# library(tidystats) # make lists and dataframes out of statistical test results
+# library(reshape2) # for transposing/melting data (can also be done with dplyr)
+# library(RColorBrewer) # color tool/palettes for plotting
+# library(captioner) # support for numbering figure and table captions (alternative to bookdown)
+# library(sqldf)
+# library(webshot)
+# library(knitr)
 ```
 
 # Statistics for thalamus and thalamic nuclei
