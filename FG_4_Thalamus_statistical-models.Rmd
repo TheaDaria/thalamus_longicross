@@ -17,11 +17,6 @@ output:
     df_print: default
 ---
 
-```{r}
-Sys.setenv(https_proxy="http://ukd-proxy:80")
-```
-
-
 ```{r library, results='hide', message=FALSE, warning=FALSE} 
 library(htmlTable)
 library(rmarkdown)
@@ -51,6 +46,8 @@ library(sjstats)
 library(sqldf)
 ```
 
+
+
 ### GLM 1 - adjusted for eTIV
 ```{r glmetiv, results="asis", message=FALSE, warning=FALSE}
 options(contrasts = c("contr.sum", "contr.poly"))
@@ -72,10 +69,8 @@ ancova.etiv <- glmdata %>%
   mutate(adj.signif = as.character(asterisk_function(p.adj))) %>%
   mutate(p.adj = formatC(p.adj, format="f", digits=4)) %>%
   mutate(p.value = formatC(p.value, format="f", digits=4)) %>%
-  mutate(is.signif = ifelse(p.adj<0.05, TRUE, FALSE)) %>%
   ungroup() %>%
-  dplyr::select(region, hemi_region, labeller, group, hemi_group, group_labeller, region_type, tidymeans, term, sumsq, df, statistic, p.value, p.adj, 
-                adj.signif, is.signif, partial.etasq) %>%
+  dplyr::select(region, hemi_region, labeller, group, hemi_group, group_labeller, region_type, tidymeans, term, sumsq, df, statistic, p.value, p.adj, adj.signif, is.signif, partial.etasq) %>%
   arrange(hemi_region) %>%
   mutate(hemi_region = as.character(hemi_region))
 
@@ -180,10 +175,8 @@ filter(region %in% "Whole_thalamus") %>%
   mutate(adj.signif = as.character(asterisk_function(p.adj))) %>%
   mutate(p.adj = formatC(p.adj, format="f", digits=4)) %>%
   mutate(p.value = formatC(p.value, format="f", digits=4)) %>%
-  mutate(is.signif = ifelse(p.adj<0.05, TRUE, FALSE)) %>%
   ungroup() %>%
-  dplyr::select(region, hemi_region, labeller, group, hemi_group, group_labeller, region_type,tidymeans, term, sumsq, df, statistic, p.value, p.adj, 
-                adj.signif, is.signif, partial.etasq) %>%
+  dplyr::select(region, hemi_region, labeller, group, hemi_group, group_labeller, region_type,tidymeans, term, sumsq, df, statistic, p.value, p.adj, adj.signif, is.signif, partial.etasq) %>%
   arrange(hemi_region) %>%
   mutate(hemi_region = as.character(hemi_region))
 
@@ -259,10 +252,150 @@ barplotarrange.whole <- ggarrange(plotlist=bp.nuclei.whole, ncol=5, nrow=5) %>%
 #ggsave(barplotarrange.whole, filename="figures/barplots_glm_whole.png", width=25, height=25, dpi=300)
 ```
 
+### GLM 3 - adjusted for total subcortical gray matter volume
+```{r glmsubcort, results="asis", message=FALSE, warning=FALSE}
+ancova.subcort <- glmdata %>%
+  mutate(point_of_research = relevel(as.factor(point_of_research), ref="HCW")) %>%
+  nest(data = - c(region, hemi_region, labeller, group, hemi_group, group_labeller, region_type)) %>%
+  mutate(
+    lm = map(data, ~ lm(measure ~ point_of_research + e_tiv + subcort_gray, data = .x, na.action = na.omit)),
+    adj.means = map(lm, ~ emmeans(.x, "point_of_research")),
+    tidymeans = map(adj.means, tidy),
+    anova = map(lm, ~ car::Anova(.x, type="III", test.statistic="F")),
+    anova_stats = map(anova, ~ sjstats::anova_stats(.x))) %>%
+  unnest(anova_stats) %>%
+  mutate(whole.sub = ifelse(region %in% "Whole_thalamus", "whole", "subregion")) %>%
+  group_by(whole.sub, term) %>%
+  mutate(p.adj = p.adjust(p.value, method="BH")) %>%
+  mutate(p.adj = as.numeric(p.adj)) %>%
+  mutate(is.signif = ifelse(p.adj<0.05, TRUE, FALSE)) %>%
+  mutate(adj.signif = as.character(asterisk_function(p.adj))) %>%
+  mutate(p.adj = formatC(p.adj, format="f", digits=2)) %>%
+  mutate(p.value = formatC(p.value, format="f", digits=4)) %>%
+  ungroup() %>%
+  dplyr::select(region, hemi_region, labeller, group, hemi_group, group_labeller, region_type, tidymeans, term, sumsq, df, statistic, p.value, p.adj, adj.signif, partial.etasq) %>%
+  arrange(hemi_region) %>%
+  mutate(hemi_region = as.character(hemi_region)) %>%
+  mutate(variables_group = dplyr::recode(hemi_region, !!!variables_grouper.glm, .default = "missing group"))
+
+emmeans.subcort <- ancova.subcort %>%
+  dplyr::select(hemi_region, region, labeller, tidymeans) %>%
+  distinct(hemi_region, .keep_all=TRUE) %>%
+  unnest(tidymeans) %>%
+  dplyr::select(hemi_region, region, labeller, point_of_research, estimate, std.error)
+``` 
+
+
+```{r subcortplot, fig.cap="Barplots for GLMs, adjusted for eTIV", echo=TRUE, message=FALSE, warning=FALSE}
+bardata.subcort <- emmeans.subcort%>%
+  group_by(region) %>% arrange(region, .by_group=TRUE) %>%
+  mutate(point_of_research = dplyr::recode(point_of_research,
+                                    "T1" = "AN",
+                                    "HCW" = "HC"))
+
+y.position.bar.subcort <- emmeans.subcort %>% 
+  group_by(region) %>%
+  arrange(desc(estimate), .by_group=TRUE) %>%
+  slice_head(n = 1) %>%
+  mutate(ymin = round((0.7*estimate)-2, -1)) %>%
+  mutate(ymax = round((1.3*estimate)+2, -1)) %>%
+  mutate(y.position = (0.8*(ymax-ymin))+ymin) %>%
+  dplyr::select(region, y.position, ymin, ymax) %>%
+  ungroup()
+
+plotlist = list()
+
+for (Region in unique(bardata.subcort$region)) {
+  
+  plotdata <- bardata.subcort %>% filter(region %in% Region)
+  
+  pvalues <- ancova.subcort %>%
+    filter(term %in% "point_of_research") %>%
+    filter(region %in% Region) %>%
+    rename(point_of_research = term) %>%
+    dplyr::select(region, hemi_region, labeller, point_of_research, adj.signif) %>%
+    left_join(y.position.bar.subcort, by="region") %>%
+    mutate(xmin = 1) %>%
+    mutate(xmax = 2)
+  
+  yaxis <- y.position.bar.subcort %>%
+    filter(region %in% Region)
+  
+  barplots <- plotdata %>%
+    ggplot(aes(x=point_of_research, y=estimate, fill = point_of_research, color = point_of_research)) +
+    geom_bar(stat="identity", color=NA, position=position_dodge()) +
+    geom_errorbar(aes(ymin=estimate-std.error, ymax=estimate+std.error), width=0.2, size=1.0, color = "BLACK",
+                 position=position_dodge(1)) +
+    geom_signif(data=pvalues, aes(annotations = adj.signif, y_position = y.position, xmin = xmin, xmax = xmax), 
+              tip_length = 0.05, textsize = 6, vjust = -0.45, color = "BLACK", manual = TRUE) +
+    scale_y_continuous(breaks = pretty_breaks(n=3)) +
+    coord_cartesian(ylim=c(yaxis$ymin, yaxis$ymax)) +
+    scale_fill_jama(alpha=0.8) + scale_color_jama(alpha=0.8) +
+    plot_theme_transparent2 + 
+    theme(axis.title.x = element_blank(), axis.title.y = element_blank()) +
+    theme(strip.text.x = element_text(size=15)) +
+    guides(fill = FALSE, color = FALSE) +
+    facet_wrap(~ labeller, scales="free_x", labeller = label_wrap_gen(width=15))
+  
+ plotlist[[Region]] = barplots
+ 
+}
+
+bp.whole.subcort <- plotlist$Whole_thalamus
+bp.nuclei.subcort <- plotlist[1:25] 
+
+barplotarrange.subcort <- ggarrange(bp.whole.subcort, 
+          ggarrange(plotlist=bp.nuclei.subcort, ncol=5, nrow=5),
+          ncol=2, widths=c(1,2)) %>%
+  annotate_figure(left = text_grob("Volumes (EMM ± SEM) in mm^3", size=24, rot=90))
+
+#barplotarrange.subcort
+
+#ggsave(barplotarrange.subcort, filename="figures/GLM3a_barplots.png", width=30, height=25, dpi=300)
+```
 
 ### FDR correction ###########################################################################################################################
 
 ### FDR corection for GLM 1 (etiv) and GLM 2 (etiv + whole thal)
+<!-- # ```{r padjustglm, results="asis", message=FALSE, warning=FALSE} -->
+<!-- # p.adjust.1 <- ancova.etiv %>% -->
+<!-- #   filter(term %in% "point_of_research") %>% -->
+<!-- #   mutate(main_glm = "GLM 1") %>% -->
+<!-- #   rename(point_of_research = term) %>% -->
+<!-- #   dplyr::select(main_glm, region, hemi_region, labeller, point_of_research, p.value, region_type) -->
+<!-- #  -->
+<!-- # p.adjust.2 <- ancova.whole %>% -->
+<!-- #   filter(term %in% "point_of_research") %>% -->
+<!-- #   mutate(main_glm = "GLM 2") %>% -->
+<!-- #   rename(point_of_research = term) %>% -->
+<!-- #   dplyr::select(main_glm, region, hemi_region, labeller, point_of_research, p.value, region_type) -->
+<!-- #  -->
+<!-- #  -->
+<!-- # p.combiadjust <- bind_rows(p.adjust.1, p.adjust.2) %>% -->
+<!-- #   group_by(region_type) %>%  -->
+<!-- #   mutate(p.adj.combi = p.adjust(p.value, method="BH")) %>% -->
+<!-- #   mutate(p.adj.combi = as.numeric(p.adj.combi)) %>% -->
+<!-- #   mutate(adj.signif.combi = as.character(asterisk_function(p.adj.combi)))  %>% -->
+<!-- #   ungroup() -->
+<!-- #  -->
+<!-- # ancova.etiv_fdr <- p.combiadjust %>% -->
+<!-- #   filter(main_glm == "GLM 1") %>% -->
+<!-- #   dplyr::select(hemi_region, p.adj.combi, adj.signif.combi) %>% -->
+<!-- #   full_join(ancova.etiv, by="hemi_region") %>% -->
+<!-- #   mutate(is.signif.combi = ifelse(p.adj.combi<0.05, TRUE, FALSE)) %>% -->
+<!-- #   mutate(p.adj.combi = formatC(p.adj.combi, format="f", digits=4)) %>% -->
+<!-- #   dplyr::select(-c(is.signif)) -->
+<!-- #  -->
+<!-- # ancova.whole_fdr <- p.combiadjust %>% -->
+<!-- #   filter(main_glm == "GLM 2") %>% -->
+<!-- #   dplyr::select(hemi_region, p.adj.combi, adj.signif.combi) %>% -->
+<!-- #   full_join(ancova.whole, by="hemi_region")%>% -->
+<!-- #   mutate(is.signif.combi = ifelse(p.adj.combi<0.05, TRUE, FALSE)) %>% #why compute this?? #just base follow up analysis on one main GLM -->
+<!-- #   mutate(p.adj.combi = formatC(p.adj.combi, format="f", digits=4)) %>% -->
+<!-- #   dplyr::select(-c(is.signif)) -->
+<!-- # ``` -->
+
+### FDR corection for GLM 1 (etiv), GLM 2 (etiv + whole thal), and GLM 3 (etiv + subcort)
 ```{r padjustglm, results="asis", message=FALSE, warning=FALSE}
 p.adjust.1 <- ancova.etiv %>%
   filter(term %in% "point_of_research") %>%
@@ -276,29 +409,37 @@ p.adjust.2 <- ancova.whole %>%
   rename(point_of_research = term) %>%
   dplyr::select(main_glm, region, hemi_region, labeller, point_of_research, p.value, region_type)
 
+p.adjust.3 <- ancova.subcort %>%
+  filter(term %in% "point_of_research") %>%
+  mutate(main_glm = "GLM 3") %>%
+  rename(point_of_research = term) %>%
+  dplyr::select(main_glm, region, hemi_region, labeller, point_of_research, p.value, region_type)
 
-p.combiadjust <- bind_rows(p.adjust.1, p.adjust.2) %>%
+p.combiadjust <- bind_rows(p.adjust.1, p.adjust.2, p.adjust.3) %>%
   group_by(region_type) %>% 
   mutate(p.adj.combi = p.adjust(p.value, method="BH")) %>%
   mutate(p.adj.combi = as.numeric(p.adj.combi)) %>%
-  mutate(adj.signif.combi = as.character(asterisk_function(p.adj.combi)))  %>%
-  ungroup()
+  mutate(adj.signif.combi = as.character(asterisk_function(p.adj.combi)))%>%
+  ungroup()%>%
+  mutate(is.signif.combi = ifelse(p.adj.combi<0.05, TRUE, FALSE)) %>%
+  mutate(p.adj.combi = formatC(p.adj.combi, format="f", digits=4))
 
 ancova.etiv_fdr <- p.combiadjust %>%
   filter(main_glm == "GLM 1") %>%
-  dplyr::select(hemi_region, p.adj.combi, adj.signif.combi) %>%
-  full_join(ancova.etiv, by="hemi_region") %>%
-  mutate(is.signif.combi = ifelse(p.adj.combi<0.05, TRUE, FALSE)) %>%
-  mutate(p.adj.combi = formatC(p.adj.combi, format="f", digits=4)) %>%
-  dplyr::select(-c(is.signif))
+  dplyr::select(hemi_region, p.adj.combi, adj.signif.combi, is.signif.combi) %>%
+  full_join(ancova.etiv, by="hemi_region")
+
 
 ancova.whole_fdr <- p.combiadjust %>%
   filter(main_glm == "GLM 2") %>%
-  dplyr::select(hemi_region, p.adj.combi, adj.signif.combi) %>%
-  full_join(ancova.whole, by="hemi_region")%>%
-  mutate(is.signif.combi = ifelse(p.adj.combi<0.05, TRUE, FALSE)) %>% #why compute this?? #just base follow up analysis on one main GLM
-  mutate(p.adj.combi = formatC(p.adj.combi, format="f", digits=4)) %>%
-  dplyr::select(-c(is.signif))
+  dplyr::select(hemi_region, p.adj.combi, adj.signif.combi, is.signif.combi) %>%
+  full_join(ancova.whole, by="hemi_region")
+
+
+ancova.subcort_fdr <- p.combiadjust %>%
+  filter(main_glm == "GLM 3") %>%
+  dplyr::select(hemi_region, p.adj.combi, adj.signif.combi, is.signif.combi) %>%
+  full_join(ancova.subcort, by="hemi_region")
 ```
 
 
@@ -351,7 +492,7 @@ barplotarrange.etiv_fdr <- ggarrange(bp.whole.etiv_fdr,
 
 #barplotarrange.etiv_fdr
 
-ggsave(barplotarrange.etiv_fdr, filename="figures/barplots_glm_etiv_fdr.png", width=30, height=25, dpi=300)
+ggsave(barplotarrange.etiv_fdr, filename="figures/GLM1a_barplots_fdr.png", width=30, height=25, dpi=300)
 ```
 
 ### FDR corrected GLM 2 Bars
@@ -399,13 +540,65 @@ barplotarrange.whole_fdr <- ggarrange(plotlist=bp.nuclei.whole_fdr, ncol=5, nrow
 
 #barplotarrange.whole_fdr
 
-ggsave(barplotarrange.whole_fdr, filename="figures/barplots_glm_whole_fdr.png", width=25, height=25, dpi=300)
+ggsave(barplotarrange.whole_fdr, filename="figures/GLM2a_barplots_fdr.png", width=25, height=25, dpi=300)
+```
+
+### FDR corrected GLM 3 Bars
+```{r subcortplot, fig.cap="Barplots for GLMs, adjusted for subcort and FDR", echo=TRUE, message=FALSE, warning=FALSE}
+
+for (Region in unique(bardata.subcort$region)) {
+  
+  plotdata <- bardata.subcort %>% filter(region %in% Region)
+  
+  pvalues_fdr <- ancova.subcort_fdr %>%
+    filter(term %in% "point_of_research") %>%
+    filter(region %in% Region) %>%
+    rename(point_of_research = term) %>%
+    dplyr::select(region, hemi_region, labeller, point_of_research, adj.signif.combi) %>%
+    left_join(y.position.bar.subcort, by="region") %>%
+    mutate(xmin = 1) %>%
+    mutate(xmax = 2)
+  
+  yaxis <- y.position.bar.subcort %>%
+    filter(region %in% Region)
+  
+  barplots <- plotdata %>%
+    ggplot(aes(x=point_of_research, y=estimate, fill = point_of_research, color = point_of_research)) +
+    geom_bar(stat="identity", color=NA, position=position_dodge()) +
+    geom_errorbar(aes(ymin=estimate-std.error, ymax=estimate+std.error), width=0.2, size=1.0, color = "BLACK",
+                 position=position_dodge(1)) +
+    geom_signif(data=pvalues_fdr, aes(annotations = adj.signif.combi, y_position = y.position, xmin = xmin, xmax = xmax), 
+              tip_length = 0.05, textsize = 6, vjust = -0.45, color = "BLACK", manual = TRUE) +
+    scale_y_continuous(breaks = pretty_breaks(n=3)) +
+    coord_cartesian(ylim=c(yaxis$ymin, yaxis$ymax)) +
+    scale_fill_jama(alpha=0.8) + scale_color_jama(alpha=0.8) +
+    plot_theme_transparent2 + 
+    theme(axis.title.x = element_blank(), axis.title.y = element_blank()) +
+    theme(strip.text.x = element_text(size=15)) +
+    guides(fill = FALSE, color = FALSE) +
+    facet_wrap(~ labeller, scales="free_x", labeller = label_wrap_gen(width=15))
+  
+ plotlist[[Region]] = barplots
+ 
+}
+
+bp.whole.subcort_fdr <- plotlist$Whole_thalamus
+bp.nuclei.subcort_fdr <- plotlist[1:25] 
+
+barplotarrange.subcort_fdr <- ggarrange(bp.whole.subcort_fdr, 
+          ggarrange(plotlist=bp.nuclei.subcort_fdr, ncol=5, nrow=5),
+          ncol=2, widths=c(1,2)) %>%
+  annotate_figure(left = text_grob("Volumes (EMM ± SEM) in mm^3", size=24, rot=90))
+
+
+
+ggsave(barplotarrange.subcort_fdr, filename="figures/GLM3a_barplots_fdr.png", width=30, height=25, dpi=300)
 ```
 
 ### Robust regression models ############# using only significant nuclei from GLM 1 & 2 ########################################################
 
 
-## RLM1: etiv and age as covariables for predictor, 
+## RLM1a: etiv and age as covariables for predictor, 
 ## Predictor: ZWANG
 ```{r robustregressionnuclei, results="asis", message=FALSE, warning=FALSE}
 sample_regression <- sample %>%
@@ -453,16 +646,33 @@ cordata.rlm1 <- ancova.etiv_fdr %>%
                 measure, 
                 resultquest_scl90r_skazwang) %>%
   pivot_longer(-c(storage_name, hemi_region, labeller, age_at_date_of_research, e_tiv, measure), 
-               names_to = "scale", values_to = "value") #%>%
+               names_to = "scale", values_to = "score") %>%
   nest(-c(hemi_region, labeller, scale)) %>%
-  mutate(
-    rlm = map(data, ~ rlm(value ~ measure + age_at_date_of_research + e_tiv, data=.x, na.action = na.omit)),
+ 
+# at this point I exchanged the predictor measure and the predicted clinical Zwang score
+# into predicted measure and introduced the clinical Zwang score as a covariate
+  
+    mutate(
+    rlm = map(data, ~ rlm(measure ~ score + age_at_date_of_research + e_tiv, data=.x, na.action = na.omit)),
     tidyrlm = map(rlm, tidy),
     tidyrlm = map(tidyrlm, ~ rename(.x, t.value = statistic)),
-    testrlm = map(rlm, ~ f.robftest(.x, var = "measure")),
+    testrlm = map(rlm, ~ f.robftest(.x, var = "score")),
     tidytestrlm = map(testrlm, tidy),
     tidytestrlm = map(tidytestrlm, ~ rename(.x, F.value = statistic)),
-    filterrlm = map(tidyrlm, ~ filter(.x, term %in% "measure"))) %>%
+    filterrlm = map(tidyrlm, ~ filter(.x, term %in% "score"))) %>%
+  
+###### this is the old code
+  
+  # mutate(
+  #   rlm = map(data, ~ rlm(score ~ measure + age_at_date_of_research + e_tiv, data=.x, na.action = na.omit)),
+  #   tidyrlm = map(rlm, tidy),
+  #   tidyrlm = map(tidyrlm, ~ rename(.x, t.value = statistic)),
+  #   testrlm = map(rlm, ~ f.robftest(.x, var = "measure")),
+  #   tidytestrlm = map(testrlm, tidy),
+  #   tidytestrlm = map(tidytestrlm, ~ rename(.x, F.value = statistic)),
+  #   filterrlm = map(tidyrlm, ~ filter(.x, term %in% "measure"))) %>%
+  
+  
   unnest(tidytestrlm, filterrlm) %>%
   mutate(unadj.signif = as.character(asterisk_function(p.value))) %>%
   mutate(p.adj = p.adjust(p.value, method="BH")) %>%
@@ -480,7 +690,7 @@ cordata.rlm1 <- ancova.etiv_fdr %>%
   # mutate(variables_group = dplyr::recode(hemi_region, !!!variables_grouper.glm, .default = "missing group")) %>%
   ungroup()
 
-write.csv(cordata.rlm1,"tables/RLM1+ZWANG_signinuclei_fromGLM.csv", row.names = FALSE)
+write.csv(cordata.rlm1,"tables/RLM1a_ZWANG_signinuclei_fromGLM1a.csv", row.names = FALSE)
 
 
 # cordata.rlm1 %>%
@@ -492,13 +702,13 @@ write.csv(cordata.rlm1,"tables/RLM1+ZWANG_signinuclei_fromGLM.csv", row.names = 
 #   save_kable(file="tables/thalamus_RLM1_FDR.png", zoom=5)
 ```
 
-## RLM2: etiv and age as covariables for predictor, 
-## Predictor: ZWANG
+## RLM2a: etiv and age as covariables for predictor, 
+## Predictor: LEPTIN
 ```{r robustregressionnuclei, results="asis", message=FALSE, warning=FALSE}
 sample_regression <- sample %>%
-dplyr::select(storage_name, resultquest_scl90r_skazwang)
+dplyr::select(storage_name, research_blood_results_leptin)
 
-cordata.rlm1 <- ancova.etiv_fdr %>%
+cordata.rlm2 <- ancova.etiv_fdr %>%
   filter(term == "point_of_research") %>%
   dplyr::select(hemi_region, is.signif.combi) %>%
   right_join(glmdata, by="hemi_region") %>%
@@ -538,18 +748,34 @@ cordata.rlm1 <- ancova.etiv_fdr %>%
                 age_at_date_of_research, 
                 e_tiv, 
                 measure, 
-                resultquest_scl90r_skazwang) %>%
+                research_blood_results_leptin) %>%
   pivot_longer(-c(storage_name, hemi_region, labeller, age_at_date_of_research, e_tiv, measure), 
-               names_to = "scale", values_to = "value") #%>%
+               names_to = "scale", values_to = "score") %>%
   nest(-c(hemi_region, labeller, scale)) %>%
+  
+# at this point I exchanged the predictor measure and the predicted clinical Zwang score
+# into predicted measure and introduced the clinical Zwang score as a covariate
+  
   mutate(
-    rlm = map(data, ~ rlm(value ~ measure + age_at_date_of_research + e_tiv, data=.x, na.action = na.omit)),
+    rlm = map(data, ~ rlm(measure ~ score + age_at_date_of_research + e_tiv, data=.x, na.action = na.omit)),
     tidyrlm = map(rlm, tidy),
     tidyrlm = map(tidyrlm, ~ rename(.x, t.value = statistic)),
-    testrlm = map(rlm, ~ f.robftest(.x, var = "measure")),
+    testrlm = map(rlm, ~ f.robftest(.x, var = "score")),
     tidytestrlm = map(testrlm, tidy),
     tidytestrlm = map(tidytestrlm, ~ rename(.x, F.value = statistic)),
-    filterrlm = map(tidyrlm, ~ filter(.x, term %in% "measure"))) %>%
+    filterrlm = map(tidyrlm, ~ filter(.x, term %in% "score"))) %>%
+
+###### this is the old code
+  
+   # mutate(
+   #  rlm = map(data, ~ rlm(score ~ measure + age_at_date_of_research + e_tiv, data=.x, na.action = na.omit)),
+   #  tidyrlm = map(rlm, tidy),
+   #  tidyrlm = map(tidyrlm, ~ rename(.x, t.value = statistic)),
+   #  testrlm = map(rlm, ~ f.robftest(.x, var = "measure")),
+   #  tidytestrlm = map(testrlm, tidy),
+   #  tidytestrlm = map(tidytestrlm, ~ rename(.x, F.value = statistic)),
+   #  filterrlm = map(tidyrlm, ~ filter(.x, term %in% "measure"))) %>%
+  
   unnest(tidytestrlm, filterrlm) %>%
   mutate(unadj.signif = as.character(asterisk_function(p.value))) %>%
   mutate(p.adj = p.adjust(p.value, method="BH")) %>%
@@ -561,13 +787,13 @@ cordata.rlm1 <- ancova.etiv_fdr %>%
   nest(-c(hemi_region, labeller, scale)) %>%
   group_by(hemi_region) %>%
   pivot_wider(names_from = "scale", values_from = "data") %>%
-  unnest(resultquest_scl90r_skazwang)  %>%
+  unnest(research_blood_results_leptin)  %>%
   arrange(hemi_region) %>%
   mutate(hemi_region = as.character(hemi_region)) %>%
   # mutate(variables_group = dplyr::recode(hemi_region, !!!variables_grouper.glm, .default = "missing group")) %>%
   ungroup()
 
-write.csv(cordata.rlm1,"tables/RLM2+LEPTIN_signinuclei+fromGLM", row.names = FALSE)
+write.csv(cordata.rlm1,"tables/RLM2a_LEPTIN_signinuclei_fromGLM1a.csv", row.names = FALSE)
 ```
 
 

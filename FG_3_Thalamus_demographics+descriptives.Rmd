@@ -93,6 +93,7 @@ library(sfsmisc)
 # library(knitr)
 ```
 
+
 # Statistics for thalamus and thalamic nuclei
 
 ### getting Dataframe with demographics and FS data´
@@ -347,13 +348,13 @@ descrthalamus_join %>%
   unite("mean_sd_HC", c(mean.y, sd.y), sep = " ± ", remove = FALSE, na.rm = FALSE) %>%
   unite("range_AN", c(min.x, max.x), sep = " – ", remove = FALSE, na.rm = FALSE) %>%
   unite("range_HC", c(min.y, max.y), sep = " – ", remove = FALSE, na.rm = FALSE) %>%
-  dplyr::select(labeller, N, mean_sd_AN, range_AN, mean_sd_HC, range_HC) %>%
-  knitr::kable(format = "html", digits=2, col.names = c("Raw volumes in mm^3", "acAN/HC", "Mean ± SD", "Range (min – max)", "Mean ± SD", "Range (min – max)"), align = "l", caption = "Descriptive statistics of raw thalamic (nuclei) volumes (whole thalamus and all nuclei) in acAN and age-matched HC") %>%
-  kable_paper(bootstrap_options="striped", full_width=FALSE, position="left", html_font="Arial", font_size="15") %>%
-  add_header_above(c("", "n", "acAN"=2, "HC"=2)) %>%
-  add_header_above(c("","", "Sample"=4)) %>%
-  pack_rows(index = table(fct_inorder(descrthalamus_join$region_type))) %>%
-  save_kable(file="tables/thalamus_volumes.png", zoom=4)
+  dplyr::select(labeller, N, mean_sd_AN, range_AN, mean_sd_HC, range_HC) #%>%
+  # knitr::kable(format = "html", digits=2, col.names = c("Raw volumes in mm^3", "acAN/HC", "Mean ± SD", "Range (min – max)", "Mean ± SD", "Range (min – max)"), align = "l", caption = "Descriptive statistics of raw thalamic (nuclei) volumes (whole thalamus and all nuclei) in acAN and age-matched HC") %>%
+  # kable_paper(bootstrap_options="striped", full_width=FALSE, position="left", html_font="Arial", font_size="15") %>%
+  # add_header_above(c("", "n", "acAN"=2, "HC"=2)) %>%
+  # add_header_above(c("","", "Sample"=4)) %>%
+  # pack_rows(index = table(fct_inorder(descrthalamus_join$region_type))) %>%
+  # save_kable(file="tables/thalamus_volumes.png", zoom=4)
 
 
 ```

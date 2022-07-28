@@ -324,10 +324,50 @@ only one HWC was excluded in this step. subject was over 18 with a BMI of 28.65.
 #stopifnot(nrow(sample) == 340)
 ```
 
+## Alternatives sample: ohne Comorbidities
+```{r}
+sample.nocomorb <- sample %>%
+  dplyr::select(storage_name, point_of_research, age_at_date_of_research, psychiatric_disorders) %>%
+  filter(psychiatric_disorders == "nein") %>%
+  dplyr::select(-c(psychiatric_disorders))
+```
 
-*9. getting FS data for sample*
+## Alternatives sample: ohne SSRIs
+```{r}
+sample.noSSRI <- sample %>%
+  dplyr::select(storage_name, point_of_research, age_at_date_of_research, current_medication, type_of_current_medication___1) %>%
+  filter(type_of_current_medication___1 == "Unchecked") %>% # exclude all subjects with antidepressant medication 
+  dplyr::select(-c(current_medication, type_of_current_medication___1))
+```
+
+## Alternatives sample: ohne Comorbidities und ohne SSRIs
+```{r}
+sample.nocomorb_SSRI <- sample %>%
+  dplyr::select(storage_name, point_of_research, age_at_date_of_research,type_of_current_medication___1, psychiatric_disorders) %>%
+  filter(type_of_current_medication___1 == "Unchecked") %>%
+  filter(psychiatric_disorders == "nein") %>%
+  dplyr::select(-c(type_of_current_medication___1, psychiatric_disorders))
+
+```
+
+## Alternatives sample: ohne binge/purge
+```{r}
+sample.bingepurge <- sample %>%
+  filter(!siabex_result_an_type == 2) %>%
+  dplyr::select(storage_name, point_of_research, age_at_date_of_research, siabex_result_an_type) %>%
+  dplyr::select(-c(siabex_result_an_type))
+
+# "1.0" = "restrictive", "2.0" = "binge/purge", "0" = Fehler
+```
+
+
+*9. getting FS data for alternative samples*
 ```{r getGLMdata, results="asis", message=FALSE, warning=FALSE}
-glmdata <- sample %>% 
+#glmdata <- sample %>% 
+#glmdata <- sample.nocomorb %>% 
+#glmdata <- sample.noSSRI %>% 
+#glmdata <- sample.nocomorb_SSRI %>% 
+glmdata <- sample.bingepurge %>%
   dplyr::select(storage_name, point_of_research, age_at_date_of_research) %>%
   left_join(get_aseg_volumes()) %>%
   left_join(get_cnr()) %>%
