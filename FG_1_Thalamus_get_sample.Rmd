@@ -539,3 +539,7 @@ glmdata <- sample.bingepurge %>%
 #                            'rh_Whole_thalamus' = "Whole Thalamus")
 ```
 
+```{r}
+leptin.batch <- read_csv("data/data/QRILC_leptin.csv", col_types = cols()) 
+```
+

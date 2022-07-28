@@ -1,0 +1,2287 @@
+---
+title: "Cross-sectional amygdala nuclei project in acAN and HC"
+author: "Marie-Louis Wronski"
+date: "`r Sys.Date()`"
+output: 
+  bookdown::html_document2:
+    code_folding: hide
+    toc: yes
+    toc_depth: 5
+    highlight: tango
+    theme: paper
+    fig_width: 32
+    fig_height: 22
+    fig_caption: yes
+    number_sections: yes
+    keep_md: yes
+    df_print: default
+---
+
+```{r library, results='hide', message=FALSE, warning=FALSE}
+#library(devtools) # for development versions on GitHub
+library(readr)  # for data import (e.g. read_csv() and .txt)
+library(dplyr)  # for data transformation (e.g. mutate(), filter(), group_by(), join())
+library(tidyr)  # for data wrangling (e.g. unnest(), gather(), spread())
+library(purrr)  # for applying functions and working with lists (e.g. map(), reduce(), transpose())
+library(stringr) # for string manipulation (e.g. str_detect(), str_extract(), str_subset(); string pattern - regular expressions)
+library(forcats) # for dealing with factors (e.g. reordering)
+library(ggplot2) # for data visualization (plotting)
+#library(ggforce) # extends functionality of ggplot2 (e.g. spreads boxplot facets (facet_wrap) over multiple pages)
+library(cowplot) # extends functionality of ggplot2 (e.g. create raincloud plots)
+#library(PupillometryR) # for raincloud (flat violin) plots
+library(ggsci) # alternative color tool/palettes for plotting (scientific journal style)
+library(ggpubr) # extends functionality of ggplot2 (e.g. editing options for publication)
+library(ggsignif) # for adding significance brackets and labels to ggplots (better compatible with geom_boxplot() than ggpubr)
+#library(stargazer) # for creating aesthetic table outputs to summarize analyses
+library(kableExtra) # for creating kables (customized tables in RMarkdown output with styling options)
+library(bookdown) # support for numbering figure and table captions
+library(rstatix) # for statistical tests (in combination with dplyr/piping and plotting) and summary statistics
+#library(psych) # additional statistic options (e.g. correlation matrix, partial correlations)
+library(car) # for statistical models (ANCOVA with type III errors), dummy coding
+#library(lme4) # for linear mixed modelling
+library(MASS) # for robust linear model (RLM)
+library(sfsmisc) # Robust F-Test: Wald test for multiple coefficients of rlm() 
+library(broom) # tidy test output, e.g. of GLM
+#library(broom.mixed) # tidy mixed model
+library(scales) # for scale and percentage formatting (optional)
+library(MatchIt) # for propensity (e.g. age, IQ) matching
+library(optmatch) # for optimal matching
+#library(corrplot) # generate correlation matrix/visualization
+library(ppcor) # for partial correlations
+#library(effectsize) # for effect size statistics (e.g. eta squared, Cohen's d)
+library(sjstats) # for effect size statistics
+library(pwr) # basic functions for power analysis
+library(DescTools) # interrater reliability
+library(emmeans) # for estimated marginal means (EMM) (covariate-adjusted means in ANCOVA)
+library(tidyverse)
+library(sfsmisc)
+library(PResiduals)
+library(lavaan) # for mediation analysis
+
+version[['version.string']]
+citation("MatchIt")
+citation("car")
+citation("MASS")
+citation("ggplot2")
+citation("lavaan")
+
+#library(matlib) # for Gram-Schmidt Orthogonalization of a Matrix
+#library(tidystats) # make lists and dataframes out of statistical test results
+#library(reshape2) # for transposing/melting data (can also be done with dplyr)
+#library(RColorBrewer) # color tool/palettes for plotting
+#library(captioner) # support for numbering figure and table captions (alternative to bookdown)
+```
+
+```{r}
+# Code for creating raincloud plots (geom flat violin, will be used later to visualize main analyses)
+"%||%" <- function(a, b) {
+  if (!is.null(a)) a else b
+}
+
+geom_flat_violin <- function(mapping = NULL, data = NULL, stat = "ydensity",
+                        position = "dodge", trim = TRUE, scale = "area",
+                        show.legend = NA, inherit.aes = TRUE, ...) {
+  layer(
+    data = data,
+    mapping = mapping,
+    stat = stat,
+    geom = GeomFlatViolin,
+    position = position,
+    show.legend = show.legend,
+    inherit.aes = inherit.aes,
+    params = list(
+      trim = trim,
+      scale = scale,
+      ...
+    )
+  )
+}
+
+GeomFlatViolin <-
+  ggproto("GeomFlatViolin", Geom,
+          setup_data = function(data, params) {
+            data$width <- data$width %||%
+              params$width %||% (resolution(data$x, FALSE) * 0.9)
+            
+            # ymin, ymax, xmin, and xmax define the bounding rectangle for each group
+            data %>%
+              group_by(group) %>%
+              mutate(ymin = min(y),
+                     ymax = max(y),
+                     xmin = x,
+                     xmax = x + width / 2)
+            
+          },
+          
+          draw_group = function(data, panel_scales, coord) {
+            # Find the points for the line to go all the way around
+            data <- transform(data, xminv = x,
+                              xmaxv = x + violinwidth * (xmax - x))
+            
+            # Make sure it's sorted properly to draw the outline
+            newdata <- rbind(plyr::arrange(transform(data, x = xminv), y),
+                             plyr::arrange(transform(data, x = xmaxv), -y))
+            
+            # Close the polygon: set first and last point the same
+            # Needed for coord_polar and such
+            newdata <- rbind(newdata, newdata[1,])
+            
+            ggplot2:::ggname("geom_flat_violin", GeomPolygon$draw_panel(newdata, panel_scales, coord))
+          },
+          
+          draw_key = draw_key_polygon,
+          
+          default_aes = aes(weight = 1, colour = "grey20", fill = "white", size = 0.5,
+                            alpha = NA, linetype = "solid"),
+          
+          required_aes = c("x", "y")
+)
+```
+
+Compute STAI scores  
+```{r stai, message=FALSE, warning=FALSE}
+redcap <- read_csv("data/redcap_do_not_delete/redcap.csv") %>%
+  filter(point_of_research %in% c("T1", "T2", "recAN", "HCW")) %>%
+  filter(str_detect(redcap_event_name, "atd1_[0-9]_arm_8", negate=TRUE)) %>% # remove unavailable or redundant data from Redcap import
+  filter(!is.na(storage_name)) %>% 
+  filter(!is.na(age_at_date_of_research))
+
+stai_recoded <- redcap %>% dplyr::select(storage_name, point_of_research, date_of_research, age_at_date_of_research, stai_s_item_1, stai_s_item_2, stai_s_item_3, stai_s_item_4, stai_s_item_5, stai_s_item_6, stai_s_item_7, stai_s_item_8, stai_s_item_9, stai_s_item_10, stai_s_item_11, stai_s_item_12, stai_s_item_13, stai_s_item_14, stai_s_item_15, stai_s_item_16, stai_s_item_17, stai_s_item_18, stai_s_item_19, stai_s_item_20, stai_t_item_1, stai_t_item_2, stai_t_item_3, stai_t_item_4, stai_t_item_5, stai_t_item_6, stai_t_item_7, stai_t_item_8, stai_t_item_9, stai_t_item_10, stai_t_item_11, stai_t_item_12, stai_t_item_13, stai_t_item_14, stai_t_item_15, stai_t_item_16, stai_t_item_17, stai_t_item_18, stai_t_item_19, stai_t_item_20) %>%
+  mutate_at(vars(-c(storage_name, point_of_research, date_of_research, age_at_date_of_research)),
+            funs(dplyr::recode(.,
+                          "Fast nie" = 1,
+                          "Manchmal" = 2,
+                          "Oft" = 3,
+                          "Fast immer" = 4))) %>%
+  mutate_at(vars(-c(storage_name, point_of_research, date_of_research, age_at_date_of_research)),
+            funs(as.numeric(.))) %>%
+  mutate(stai_s_item_1 = 5-stai_s_item_1) %>%
+  mutate(stai_s_item_2 = 5-stai_s_item_2) %>%
+  mutate(stai_s_item_5 = 5-stai_s_item_5) %>%
+  mutate(stai_s_item_8 = 5-stai_s_item_8) %>%
+  mutate(stai_s_item_10 = 5-stai_s_item_10) %>%
+  mutate(stai_s_item_11 = 5-stai_s_item_11) %>%
+  mutate(stai_s_item_15 = 5-stai_s_item_15) %>%
+  mutate(stai_s_item_16 = 5-stai_s_item_16) %>%
+  mutate(stai_s_item_19 = 5-stai_s_item_19) %>%
+  mutate(stai_s_item_20 = 5-stai_s_item_20) %>%
+  mutate(stai_t_item_1 = 5-stai_t_item_1) %>%
+  mutate(stai_t_item_6 = 5-stai_t_item_6) %>%
+  mutate(stai_t_item_7 = 5-stai_t_item_7) %>%
+  mutate(stai_t_item_10 = 5-stai_t_item_10) %>%
+  mutate(stai_t_item_13 = 5-stai_t_item_13) %>%
+  mutate(stai_t_item_16 = 5-stai_t_item_16) %>%
+  mutate(stai_t_item_19 = 5-stai_t_item_19) %>%
+  mutate(stai_s_score = rowMeans(subset(., select = stai_s_item_1:stai_s_item_20), 
+                                 na.rm = TRUE)) %>%
+  mutate(stai_s_score = ceiling(stai_s_score*20)) %>% # calculation of state and trait scores (possibly missing items are tolerated)
+  mutate(stai_t_score = rowMeans(subset(., select = stai_t_item_1:stai_t_item_20), 
+                                 na.rm = TRUE)) %>%
+  mutate(stai_t_score = ceiling(stai_t_score*20)) %>%
+  dplyr::select(storage_name, age_at_date_of_research, stai_s_score, stai_t_score) %>%
+  mutate(across(.cols=stai_s_score:stai_t_score, ~ ifelse(is.nan(.x), NA, .x))) # consistent formatting of "NA"s
+
+staik_s_recoded <- redcap %>% dplyr::select(storage_name, staik_s_item_1, staik_s_item_2, staik_s_item_3, staik_s_item_4, staik_s_item_5, staik_s_item_6, staik_s_item_7, staik_s_item_8, staik_s_item_9, staik_s_item_10, staik_s_item_11, staik_s_item_12, staik_s_item_13, staik_s_item_14, staik_s_item_15, staik_s_item_16, staik_s_item_17, staik_s_item_18, staik_s_item_19, staik_s_item_20) %>%
+  mutate_at(vars(-storage_name),
+            funs(dplyr::recode(.,
+                                "fast nie" = 1,
+                                "manchmal" = 2,
+                                "oft" = 3))) %>%
+  mutate_at(vars(-storage_name),
+            funs(as.numeric(.))) %>%
+  mutate(staik_s_item_1 = 4-staik_s_item_1) %>%
+  mutate(staik_s_item_3 = 4-staik_s_item_3) %>%
+  mutate(staik_s_item_6 = 4-staik_s_item_6) %>%
+  mutate(staik_s_item_8 = 4-staik_s_item_8) %>%
+  mutate(staik_s_item_10 = 4-staik_s_item_10) %>%
+  mutate(staik_s_item_12 = 4-staik_s_item_12) %>%
+  mutate(staik_s_item_13 = 4-staik_s_item_13) %>%
+  mutate(staik_s_item_14 = 4-staik_s_item_14) %>%
+  mutate(staik_s_item_17 = 4-staik_s_item_17) %>%
+  mutate(staik_s_item_20 = 4-staik_s_item_20) %>%
+  mutate(staik_s_score = rowMeans(subset(., select = staik_s_item_1:staik_s_item_20), 
+                                  na.rm = TRUE)) %>%
+  mutate(staik_s_score = ceiling(staik_s_score*20)) %>%
+  dplyr::select(storage_name, staik_s_score) %>%
+  mutate(staik_s_score = ifelse(is.nan(staik_s_score), NA, staik_s_score))
+
+staik_t_recoded <- redcap %>% dplyr::select(storage_name, staik_t_item_1, staik_t_item_2, staik_t_item_3, staik_t_item_4, staik_t_item_5, staik_t_item_6, staik_t_item_7, staik_t_item_8, staik_t_item_9, staik_t_item_10, staik_t_item_11, staik_t_item_12, staik_t_item_13, staik_t_item_14, staik_t_item_15, staik_t_item_16, staik_t_item_17, staik_t_item_18, staik_t_item_19, staik_t_item_20) %>%
+  mutate_at(vars(-storage_name),
+            funs(dplyr::recode(.,
+                                "Fast nie" = 1,
+                                "Manchmal" = 2,
+                                "Oft" = 3))) %>%
+  mutate_at(vars(-storage_name),
+            funs(as.numeric(.))) %>%
+  mutate(staik_t_score = rowMeans(subset(., select = staik_t_item_1:staik_t_item_20), 
+                                  na.rm = TRUE)) %>%
+  mutate(staik_t_score = ceiling(staik_t_score*20)) %>%
+  dplyr::select(storage_name, staik_t_score) %>%
+  mutate(staik_t_score = ifelse(is.nan(staik_t_score), NA, staik_t_score))
+
+stai <- stai_recoded %>%
+  left_join(staik_s_recoded, by="storage_name") %>%
+  left_join(staik_t_recoded, by="storage_name") %>%
+  mutate(s.anxiety = ifelse(age_at_date_of_research > 15, stai_s_score, staik_s_score)) %>% # Age-dependency of STAI vs. STAIK
+  mutate(t.anxiety = ifelse(age_at_date_of_research > 15, stai_t_score, staik_t_score)) %>%
+  dplyr::select(storage_name, s.anxiety, t.anxiety)
+```
+
+# Generate sample for the main analysis: acAN-T1 vs. HC
+Selection of unique subjects based on scan quality and date of research.  
+Background: Some subjects have >1 T1 MRI scan (re-inclusions (> 1 AN episode) or inclusion in different study arms (e.g., dehab and braef)). Duplicate cases have to be removed prior to any analysis.  
+
+Priorities:  
+1: Within-subject amygdala segmentation quality (outlier-based);  
+2: For AN: first AN episode and/or date closest to admission/acute state (within 96h after admission, less therapeutic confounding), for HC: first scan date consistent with AN (e.g. dehab preferred over braef);  
+3: General QC rating (0-1 - good quality vs. 2; note that our general QC rating is rather cortex-focused, and, thus not prioritized).  
+
+```{r subjects01, message=FALSE, warning=FALSE}
+qcdata <- read_csv("data/data_temporary/qcdata.csv")
+
+data <- read_csv("data/data_temporary/data_na.csv") %>% 
+  filter(str_detect(redcap_event_name, "atd1_[0-9]_arm_8", negate=TRUE)) %>%
+  mutate(point_of_research = fct_relevel(point_of_research, c("T1", "HCW", "T2", "recAN"))) %>%
+  mutate(analysis = fct_relevel(analysis, c("amygdala", "hippocampus", "thalamus")))
+
+uniquesubjects <- qcdata %>%
+  filter(point_of_research %in% c("T1", "HCW")) %>%
+  mutate(outliersum = n_outliers_volume_amygdala_2.698sd + 
+                         n_outliers_symmetry_amygdala_2.698sd) %>%
+  mutate(id_subset = str_extract(storage_name, "64-[0-9][0-9]-[0-9][0-9][0-9]")) %>%
+  dplyr::select(storage_name, id_subset, point_of_research, date_of_research,
+         mriqc_smri_amhc_summary, mriqc_smri_summary, outliersum) %>%
+  filter(mriqc_smri_amhc_summary == 1) %>%
+  mutate(mriqc_smri_summary = ifelse(mriqc_smri_summary %in% c(0,1), 1, 2)) %>% # general QC ratings 0 and 1 are not distinguished (good quality!)
+  group_by(id_subset) %>%
+  arrange(outliersum, date_of_research, mriqc_smri_summary, .by_group = TRUE) %>% # priorities
+  slice_head(n = 1) %>% # select first row by group
+  ungroup() %>%
+  dplyr::select(storage_name, id_subset)
+
+uniquedata <- data %>% 
+  right_join(uniquesubjects, by="storage_name")
+
+write_csv(uniquedata, file="data/data_temporary/uniquedata.csv")
+```
+
+# Further exclusions of study participants (despite scan quality)  
+Due to BMI
+```{r bmi, results="asis", echo=TRUE, message=FALSE, warning=FALSE}
+uniquedata <- read_csv("data/data_temporary/uniquedata.csv")
+
+bmiexclusion <- uniquedata %>% filter(bmi_at_date_of_research > 28) %>%
+  distinct(storage_name, .keep_all=TRUE) %>%
+  mutate(n = n()) %>%
+  dplyr::select(storage_name, point_of_research, bmi_at_date_of_research, n)
+
+bmiexclusion  %>%
+  knitr::kable(format = "html", digits=2, col.names = c("Subject", "Study group", "BMI", "n(subjects) to exclude"), align = "l", caption = "Participants with BMI outside of our inclusion criteria") %>%
+  kable_paper(bootstrap_options="striped", full_width=FALSE, position="left", html_font="Arial", font_size="10")
+```
+
+Due to current or past drug abuse  
+```{r redcapclinical, results="hide", message=FALSE, warning=FALSE}
+redcap_clinical <- redcap %>%
+                      dplyr::select(storage_name,
+                                    minbmi,
+                                    onset_of_an,
+                                    siabex_age_onset,
+                                    siabex_result_an_type,
+                                    iq, 
+                                    hand_preference_total_value,
+                                    hand_preference_cat,
+                                    psychiatric_disorders,
+                                    depressive_disorders, 
+                                    obsessivecompulsive_disorders, 
+                                    anxiety_disorders, 
+                                    addiction, 
+                                    ptsd, 
+                                    tic_tourette,
+                                    conduct_disorder,
+                                    defiant_behaviour,
+                                    adaption_disorder,
+                                    psychosis,
+                                    attention_deficit_hyperactivity_disorder,
+                                    personality_disorders,
+                                    developmental_disorders,
+                                    other_psychiatric_disorders,
+                                    spec_other_psychiatric_disorders,
+                                    current_medication,
+                                    type_of_current_medication___1, 
+                                    type_of_current_medication___2, 
+                                    type_of_current_medication___3, 
+                                    type_of_current_medication___4, 
+                                    type_of_current_medication___5, 
+                                    recent_medication,	
+                                    type_of_recent_medication___1, 
+                                    type_of_recent_medication___2, 
+                                    type_of_recent_medication___3,	
+                                    type_of_recent_medication___4,
+                                    type_of_recent_medication___5,
+                                    current_antidepressants_preparation,
+                                    recent_antidepressants_preparation,
+                                    current_neuroleptic_drug_preparation,
+                                    recent_neuroleptic_drug_preparation, 
+                                    recent_benzodiazepine_preparation,
+                                    current_smoking, 
+                                    current_cigarettes_per_day, 
+                                    current_duration_of_smoking, 
+                                    ever_smoking,
+                                    ever_cigarettes_per_day,
+                                    siabex_question_21_an_type,
+                                    siabex_question_26_alcohol_abuse, 
+                                    siabex_question_27_drug_abuse,
+                                    siabex_past_question_26_alcohol_abuse,
+                                    siabex_past_question_27_drug_abuse,
+                                    resultquest_bdi2_total, 
+                                    resultquest_edi2_total,
+                                    resultquest_edi2_ss,
+                                    resultquest_edi2_uk,
+                                    resultquest_edi2_b,
+                                    resultquest_scl90r_skagloba,
+                                    resultquest_bscs_t, resultquest_bscs_i, resultquest_bscs_s,
+                                    research_blood_results_leptin, resultquest_scl90r_skasomat,
+                resultquest_scl90r_skazwang, resultquest_scl90r_skaunsic, resultquest_scl90r_skadepre,
+                resultquest_scl90r_skaangst, resultquest_scl90r_skaaggre, resultquest_scl90r_skaphobi,
+                resultquest_scl90r_skaparan, resultquest_scl90r_skapsych) 
+
+exclusion <- uniquedata %>%
+  left_join(redcap_clinical, by="storage_name")
+```
+
+```{r drugs, results="asis", echo=TRUE, message=FALSE, warning=FALSE}
+drugexclusion <- exclusion %>%
+  filter((addiction %in% "ja") | # MINI question
+           grepl("Alkoholkonsum", spec_other_psychiatric_disorders) | # MINI question
+           grepl("starker Alkoholmissbrauch", siabex_question_26_alcohol_abuse) | # SIAB questions
+           grepl("sehr starker Alkoholmissbrauch", siabex_question_26_alcohol_abuse) |
+           grepl("starker Alkoholmissbrauch", siabex_past_question_26_alcohol_abuse) |
+           grepl("sehr starker Alkoholmissbrauch", siabex_past_question_26_alcohol_abuse) |
+           grepl("starkes Drogenproblem", siabex_question_27_drug_abuse) |
+           grepl("sehr starkes Drogenproblem", siabex_question_27_drug_abuse) |
+           grepl("starkes Drogenproblem", siabex_past_question_27_drug_abuse) |
+           grepl("sehr starkes Drogenproblem", siabex_past_question_27_drug_abuse)) %>%
+  group_by(point_of_research) %>%
+  distinct(storage_name) %>%
+  mutate(n = n())
+
+drugexclusion %>%
+  knitr::kable(format = "html", col.names = c("Subject", "Study group", "n(subjects) to exclude"), align = "l", caption = "Study participants with drug abuse (mainly alcohol) according to MINI or SIAB") %>%
+  kable_paper(bootstrap_options="striped", full_width=FALSE, position="left", html_font="Arial", font_size="10")
+```
+
+Due to psychiatric diagnoses or clinically relevant BDI-II scores in HC participants
+```{r hccomorbidity01, results="asis", echo=TRUE, message=FALSE, warning=FALSE}
+comorb_HC <- exclusion %>%
+  filter(point_of_research %in% "HCW") %>% 
+  filter((psychiatric_disorders %in% "ja") | (resultquest_bdi2_total >= 20)) %>%
+  dplyr::select(storage_name, point_of_research, resultquest_bdi2_total, depressive_disorders, obsessivecompulsive_disorders, anxiety_disorders, addiction, ptsd, tic_tourette, conduct_disorder, defiant_behaviour, adaption_disorder, psychosis, attention_deficit_hyperactivity_disorder, personality_disorders, developmental_disorders, other_psychiatric_disorders, spec_other_psychiatric_disorders) %>% 
+  distinct(storage_name, .keep_all=TRUE) %>%
+  arrange(desc(resultquest_bdi2_total), depressive_disorders, anxiety_disorders)
+
+comorb_HC$spec_other_psychiatric_disorders %>% 
+  .[!is.na(.)] %>%
+  paste(., collapse=" ; ") %>%
+  knitr::kable(format = "html", align = "l", col.names = "Summary of diagnoses", caption = "Other psychiatric disorders in HC participants") %>%
+  kable_paper(bootstrap_options="striped", full_width=FALSE, position="left", html_font="Arial", font_size="10")
+```
+
+```{r hccomorbidity02, results="asis", echo=TRUE, message=FALSE, warning=FALSE}
+comorb_HC %>%
+  dplyr::select(-c(other_psychiatric_disorders, spec_other_psychiatric_disorders)) %>%
+  filter_all(any_vars(str_detect(., "ja") | resultquest_bdi2_total>=20)) %>%
+  mutate(n_to_exclude = n()) %>%
+  mutate_all(funs(str_replace(., "ja", "yes"))) %>%
+  mutate_all(funs(str_replace(., "nein", "no"))) %>%
+  mutate_all(funs(str_replace(., "nicht mehr erhoben", NA_character_))) %>%
+  knitr::kable(format = "html", align = "l", col.names = c("Subject", "Study group", "BDI-II total scores", "Depressive disorders", "OCD", "Anxiety disorders", "Addiction", "PTSD", "Tic-Tourette syndrome", "Conduct disorder", "Defiant behavior", "Adaption disorder", "Psychosis", "ADHD", "Personality disorders", "Developmental disorders", "n(subjects) to exclude"), caption = "Psychiatric comorbidity in HC subjects") %>%
+  kable_paper(bootstrap_options="striped", full_width=FALSE, position="left", html_font="Arial", font_size="10")
+
+comorbexclusion <- comorb_HC %>%
+  filter((resultquest_bdi2_total>=20) | (storage_name == "64-23-413-1_conni"))
+```
+
+Due to psychoactive medication in HC participants  
+```{r hcmedi, results="asis", echo=TRUE, message=FALSE, warning=FALSE}
+exclusion %>%
+  filter(point_of_research %in% "HCW") %>%
+  dplyr::select(storage_name, point_of_research, type_of_current_medication___1, type_of_current_medication___2, type_of_current_medication___3, type_of_current_medication___4, type_of_current_medication___5, type_of_recent_medication___1, type_of_recent_medication___2, type_of_recent_medication___3, type_of_recent_medication___4, type_of_recent_medication___5, recent_benzodiazepine_preparation) %>%
+  distinct(storage_name, .keep_all=TRUE) %>%
+  filter_all(any_vars(str_detect(., "Checked"))) %>%
+  mutate_all(funs(str_replace(., "Checked", "yes"))) %>%
+  mutate_all(funs(str_replace(., "Unchecked", "no"))) %>%
+  mutate_all(funs(str_replace(., "unbekannt", NA_character_))) %>%
+  knitr::kable(format = "html", align = "l", col.names = c("Subject", "Study group", "Antidepressants", "Neuroleptic drugs", "Stimulating drugs", "Mood stabilizers", "Benzodiazepines", "Antidepressants", "Neuroleptic drugs", "Stimulating drugs", "Mood stabilizers", "Benzodiazepines", "Preparation"), caption = "HC participants with current (past 2 weeks) or recent (past 6 months) medication") %>%
+  kable_paper(bootstrap_options="striped", full_width=FALSE, position="left", html_font="Arial", font_size="10") %>%
+   add_header_above(c("", "", "Note that the recently applied benzodiazepine in 1 HC participant can remain included."=11), align="l") %>%
+  add_header_above(c("", "", "Current medication"=5, "Recent medication"=6), align="l")
+```
+
+Summary of further exclusions  
+According to the above observations, further subjects will be excluded from all analyses:  
+```{r subjects02, results="hide", message=FALSE, warning=FALSE}
+analysisdata <- anti_join(uniquedata, bmiexclusion, by = "storage_name") %>%
+  anti_join(drugexclusion, by="storage_name") %>%
+  anti_join(comorbexclusion, by="storage_name")
+```
+
+# Clinical features of post-exclusion sample
+```{r acan01, results="asis", echo=TRUE, message=FALSE, warning=FALSE}
+n_T1_2 <- analysisdata %>% 
+  filter(point_of_research %in% "T1") %>%
+  distinct(storage_name, .keep_all = TRUE) %>%
+  nrow(.)
+
+duration_onset <- analysisdata %>% 
+  left_join(redcap_clinical, by="storage_name") %>% 
+  filter(point_of_research %in% "T1") %>%
+  distinct(storage_name, .keep_all=TRUE) %>%
+  mutate(n_duration = sum(!is.na(onset_of_an))) %>%
+  mutate(mean_duration = mean(onset_of_an, na.rm=TRUE)) %>%
+  mutate(sd_duration = sd(onset_of_an, na.rm=TRUE)) %>%
+  mutate(n_onsetage = sum(!is.na(siabex_age_onset))) %>%
+  mutate(mean_onsetage = mean(siabex_age_onset, na.rm=TRUE)) %>%
+  mutate(sd_onsetage = sd(siabex_age_onset, na.rm=TRUE)) %>%
+  dplyr::select(storage_name, point_of_research, n_duration, mean_duration, sd_duration, n_onsetage, mean_onsetage, sd_onsetage)
+
+duration_characteristics01 <- c("n(subjects) with valid data",
+                              "mean",
+                              "standard deviation")
+
+duration <- c(unique(duration_onset$n_duration) %>% formatC(format="d", digits=0),
+              unique(duration_onset$mean_duration) %>% formatC(format="f", digits=1),
+              unique(duration_onset$sd_duration) %>% formatC(format="f", digits=1))
+
+onsetage <- c(unique(duration_onset$n_onsetage) %>% formatC(format="d", digits=0),
+              unique(duration_onset$mean_onsetage) %>% formatC(format="f", digits=1),
+              unique(duration_onset$sd_onsetage) %>% formatC(format="f", digits=1))
+
+duration_characteristics02 <- c(n_T1_2,
+                                "",
+                                "")
+
+duration_table <- tibble(duration_characteristics01, duration, onsetage, duration_characteristics02)
+  
+knitr::kable(duration_table, format = "html", col.names = c("Characteristics", "Duration of current AN episode [months]", "Age at first onset of AN [years]", "Total n(acAN-T1)"), align = "l", caption = "Descriptive statistics acAN-T1: duration of AN and age at onset of AN") %>%
+  kable_paper(bootstrap_options="striped", full_width=FALSE, position="left", html_font="Arial", font_size="10")
+```
+
+```{r acan02, results="asis", echo=TRUE, message=FALSE, warning=FALSE}
+analysisdata %>% 
+  left_join(redcap_clinical, by="storage_name") %>% 
+  mutate(siabex_result_an_type = dplyr::recode(siabex_result_an_type,
+         "1.0" = "restrictive",
+         "2.0" = "binge/purge")) %>% 
+  filter(point_of_research %in% "T1") %>%
+  distinct(storage_name, .keep_all=TRUE) %>%
+  group_by(siabex_result_an_type) %>%
+  count(.) %>%
+  mutate(percentage = 100*(n / n_T1_2)) %>%
+  knitr::kable(format = "html", digits=2, col.names = c("AN subtypes", "n(acAN-T1)", "Percentage"), align = "l", caption = "Descriptive statistics acAN-T1: Current AN subtypes") %>%
+  kable_paper(bootstrap_options="striped", full_width=FALSE, position="left", html_font="Arial", font_size="10")
+```
+
+```{r acan03, results="asis", echo=TRUE, message=FALSE, warning=FALSE}
+comorb_AN <- analysisdata %>%
+  left_join(redcap_clinical, by="storage_name") %>% 
+  filter((point_of_research %in% "T1") & (psychiatric_disorders %in% "ja")) %>%
+  dplyr::select(storage_name, point_of_research, depressive_disorders, obsessivecompulsive_disorders, anxiety_disorders, addiction, ptsd, tic_tourette, conduct_disorder, defiant_behaviour, adaption_disorder, psychosis, attention_deficit_hyperactivity_disorder, personality_disorders, developmental_disorders, other_psychiatric_disorders, spec_other_psychiatric_disorders) %>% 
+  distinct(storage_name, .keep_all=TRUE) 
+
+comorb_AN$spec_other_psychiatric_disorders %>% 
+  .[!is.na(.)] %>%
+  paste(., collapse=" ; ") %>%
+  knitr::kable(format = "html", align = "l", col.names = "Summary of diagnoses", caption = "Other psychiatric disorders in acAN-T1 participants") %>%
+  kable_paper(bootstrap_options="striped", full_width=FALSE, position="left", html_font="Arial", font_size="10")
+```
+
+**In total, n = `r nrow(comorb_AN)` out of `r n_T1_2` acAN-T1 participants have at least one psychiatric disorder.**  
+
+```{r acan04, results="asis", echo=TRUE, message=FALSE, warning=FALSE}
+comorb_AN %>%
+  dplyr::select(-c(spec_other_psychiatric_disorders, storage_name, point_of_research)) %>%
+  summarize_all(~ sum(str_count(., "ja"), na.rm=TRUE)) %>%
+  mutate(n_T1 = n_T1_2) %>%
+  knitr::kable(format = "html", align = "l", col.names = c("Depressive disorders", "OCD", "Anxiety disorders", "Addiction", "PTSD", "Tic-Tourette syndrome", "Conduct disorder", "Defiant behavior", "Adaption disorder", "Psychosis", "ADHD", "Personality disorders", "Developmental disorders", "Other psychiatric disorders", "Total n(acAN-T1)"), caption = "Descriptive statistics acAN-T1: Number of subjects with psychiatric comorbidity (individual disorders)") %>%
+  kable_paper(bootstrap_options="striped", full_width=FALSE, position="left", html_font="Arial", font_size="10")
+```
+
+```{r acan05, results="asis", echo=TRUE, message=FALSE, warning=FALSE}
+analysisdata %>%
+  left_join(redcap_clinical, by="storage_name") %>% 
+  filter(point_of_research %in% "T1") %>%
+  dplyr::select(storage_name, point_of_research, type_of_current_medication___1, current_antidepressants_preparation, type_of_current_medication___2, current_neuroleptic_drug_preparation, type_of_current_medication___3, type_of_current_medication___4, type_of_current_medication___5, type_of_recent_medication___1, type_of_recent_medication___2, type_of_recent_medication___3, type_of_recent_medication___4, type_of_recent_medication___5) %>%
+  distinct(storage_name, .keep_all=TRUE) %>%
+  filter_all(any_vars(str_detect(., "Checked"))) %>%
+  mutate_all(funs(str_replace(., "Checked", "yes"))) %>%
+  mutate_all(funs(str_replace(., "Unchecked", "no"))) %>%
+  mutate_all(funs(str_replace(., "unbekannt", NA_character_))) %>%
+  mutate(n_current_antidepressants = sum(str_count(type_of_current_medication___1, "yes"))) %>%
+  mutate(n_current_neuroleptic = sum(str_count(type_of_current_medication___2, "yes"))) %>%
+  mutate(n_T1 = n_T1_2) %>%
+  knitr::kable(format = "html", align = "l", col.names = c("Subject", "Study group", "Antidepressants", "Preparation", "Neuroleptic drugs", "Preparation (exclusion criterion)", "Stimulating drugs", "Mood stabilizers", "Benzodiazepines", "Antidepressants", "Neuroleptic drugs", "Stimulating drugs", "Mood stabilizers", "Benzodiazepines", "... on current antidepressants", "... on current neuroleptic drugs", "Total n(acAN-T1)"), caption = "Descriptive statistics acAN-T1: Current (past 2 weeks) and recent (past 6 months) psychoactive medication") %>%
+  kable_paper(bootstrap_options="striped", full_width=FALSE, position="left", html_font="Arial", font_size="10") %>%
+  add_header_above(c("", "", "Note that only selective serotonin reuptake inhibitors (SSRIs) and mirtazapine will be included in acAN-T1. According to Redcap, the subject 64-10-580-1_T1_dehab was on a neuroleptic drug at date of research, but only at dehab and not at braef, and no preparation was given. Thus, it can be assumed that there was a data entry error, and the subject can remain included."=15), align="l") %>%
+  add_header_above(c("", "", "Current medication"=7, "Recent medication"=5, "n(acAN-T1)"=3), align="l")
+```
+
+# Age-matching of HC to acAN-T1 participants of the post-exclusion sample
+```{r agematch01, results="asis", echo=TRUE, message=FALSE, warning=FALSE}
+analysisdata %>% 
+  summarize_at(vars(point_of_research,
+                    age_at_date_of_research,
+                    snr), 
+            funs(sum(is.na(.)))) %>%
+  knitr::kable(format = "html", align = "l", col.names = c("n.missing(point_of_research)", "n.missing(age)", "n.missing(snr)"), caption = "Check for missing values in the yet unmatched data.frame for future analysis") %>%
+  kable_paper(bootstrap_options="striped", full_width=FALSE, position="left", html_font="Arial", font_size="10")
+```
+
+```{r agematch02, message=FALSE, warning=FALSE}
+matchdata_age <- analysisdata %>%
+  mutate(point_of_research = dplyr::recode(point_of_research,
+                                    "HCW" = 0, # 0 for the control group
+                                    "T1" = 1)) %>% # 1 for the acAN patient ("treated") group
+  mutate(point_of_research = as.numeric(point_of_research)) %>% 
+  distinct(storage_name, .keep_all = TRUE) %>% # address single storage names/subjects for age-matching
+  matchit(point_of_research ~ age_at_date_of_research, data = ., method = "optimal", ratio = 1) # ratio: 1 HC to 1 acAN-T1, matching method: optimal matching => attempts to choose matches that collectively optimize an overall criterion, the criterion used is the mean of the absolute pair distances in the matched sample
+
+summary(matchdata_age, standardize=FALSE)
+
+data_age <- match.data(matchdata_age)
+
+analysisdata %>% semi_join(data_age, by="storage_name") %>%
+  mutate(mriqc_smri_included_19 = 1) %>%
+  dplyr::select(-c(file, file_type, id_subset)) %>%
+  write_csv(file="data/data_temporary/m.data_age.csv")
+```
+
+# Demographic and clinical variables (descriptive statistics, t-tests)
+```{r demographics, results="asis", message=FALSE, warning=FALSE}
+m.data_age <- read_csv("data/data_temporary/m.data_age.csv") %>% 
+  mutate(point_of_research = factor(point_of_research, levels = c("T1", "HCW")))
+
+labeller.function <- function(x) {
+  dplyr::recode(x,
+                "age_at_date_of_research" = "Age",
+                "iq" = "IQ",
+                "bmi_at_date_of_research" = "BMI",
+                "bmisds_at_date_of_research" = "BMI-SDS",
+                "minbmi" = "Minimal lifetime BMI",
+                "leptin" = "Leptin (µg/L)",
+                "log_leptin" = "log(10) leptin",
+                "e_tiv" = "eTIV",
+                "total_gray" = "Total GM",
+                "subcort_gray" = "Subcortical GM",
+                "cnr_total" = "CNR",
+                "snr" = "SNR",
+                "resultquest_bdi2_total" = "BDI-II total",
+                "resultquest_edi2_total" = "EDI-2 sum",
+                "resultquest_edi2_ss" = "EDI-2 drive for thinness",
+                "resultquest_edi2_uk" = "EDI-2 body dissatisfaction",
+                "resultquest_edi2_b" = "EDI-2 bulimia",
+                "edi_core" = "EDI-2 core symptoms",
+                "resultquest_scl90r_skagloba" = "SCL-90-R GSI",
+                "s.anxiety" = "STAI(K) State Anxiety",
+                "t.anxiety" = "STAI(K) Trait Anxiety")
+  }
+
+variables_grouper <- c(age_at_date_of_research = "Demographics and BMI", 
+               iq = "Demographics and BMI", 
+               bmi_at_date_of_research = "Demographics and BMI", 
+               bmisds_at_date_of_research = "Demographics and BMI",
+               minbmi  = "Demographics and BMI",
+               leptin = "Hormone parameter",
+               log_leptin = "Hormone parameter",
+               cnr_total = "Scan quality measures",
+               snr = "Scan quality measures", 
+               e_tiv = "Brain segmentation volumes",
+               subcort_gray = "Brain segmentation volumes",
+               resultquest_bdi2_total = "Symptoms",
+               resultquest_edi2_total = "Symptoms",
+               resultquest_edi2_ss = "Symptoms",
+               resultquest_edi2_uk = "Symptoms",
+               resultquest_edi2_b = "Symptoms",
+               edi_core = "Symptoms",
+               resultquest_scl90r_skagloba = "Symptoms",
+               s.anxiety = "Symptoms",
+               t.anxiety	 = "Symptoms")
+
+redcap_analysis_pre <- redcap_clinical %>%
+  dplyr::select(storage_name, iq, minbmi, research_blood_results_leptin, resultquest_bdi2_total,
+                resultquest_edi2_total, resultquest_edi2_ss, resultquest_edi2_uk, resultquest_edi2_b,
+                resultquest_scl90r_skagloba, onset_of_an) %>%
+  mutate(edi_core = (resultquest_edi2_ss + resultquest_edi2_uk + resultquest_edi2_b)/3)
+
+
+# Check leptin below LOQ and LOD (Guo, Harel, and Little 2010)
+## LOQ: limit of quantification (values might be unreliable) => 0.20 ng/ml for our leptin assay
+## LOD: limit of detection (lowest concentration of an analyte that can be distinguished with reasonable confidence from background noise) => 0.05 ng/ml for our leptin assay
+### Our strategy: raw measured values for concentrations >= LOD (limitation: limited precision between LOD and LOQ), single imputation for concentrations < LOD via LOD / sqrt(2)
+
+m.data_age %>%
+  left_join(redcap_analysis_pre, by="storage_name") %>% 
+  distinct(storage_name, .keep_all=TRUE) %>% 
+  dplyr::select(storage_name, point_of_research, research_blood_results_leptin) %>%
+  filter(!is.na(research_blood_results_leptin)) %>%
+  group_by(point_of_research) %>%
+  mutate(n_available = n()) %>%
+  mutate(n_below_0.20 = sum(research_blood_results_leptin < 0.20)) %>% 
+  mutate(n_below_0.05 = sum(research_blood_results_leptin < 0.05)) %>%
+  distinct(n_available, .keep_all=TRUE) %>% 
+  dplyr::select(n_available, n_below_0.20, n_below_0.05) %>% 
+  knitr::kable(format = "html", align = "l", col.names = c("Study group", 
+                                                           "n(leptin available)", "n(leptin < LOQ = 0.20 ng/ml)",
+                                                           "n(leptin < LOD 0.05 ng/ml)"),
+                                                           caption = "Leptin") %>%
+  kable_paper(bootstrap_options="striped", full_width=FALSE, position="left", html_font="Arial", font_size="10")
+  
+# Transformation of leptin levels
+redcap_analysis <- redcap_analysis_pre %>%
+  mutate(leptin = ifelse(research_blood_results_leptin < 0.05, 0.05/sqrt(2), research_blood_results_leptin)) %>%
+  mutate(log_leptin = log10(leptin)) %>%
+  dplyr::select(-research_blood_results_leptin)
+         
+demographics <- m.data_age %>%
+  left_join(stai, by="storage_name") %>%
+  left_join(redcap_analysis, by="storage_name") %>% 
+  distinct(storage_name, .keep_all=TRUE) %>%
+  group_by(point_of_research) %>%
+  rstatix::get_summary_stats(age_at_date_of_research, iq, bmi_at_date_of_research,
+                             bmisds_at_date_of_research, minbmi, leptin, log_leptin,
+                             e_tiv, subcort_gray, edi_core,
+                             resultquest_bdi2_total, 
+                             resultquest_scl90r_skagloba,
+                             s.anxiety, t.anxiety) %>%
+  dplyr::select(point_of_research, variable, n, mean, sd, min, max) %>%
+  mutate(variable = factor(variable, levels=c("age_at_date_of_research", "iq", "bmi_at_date_of_research", "bmisds_at_date_of_research", "minbmi", "leptin", "log_leptin", "e_tiv", "subcort_gray", "edi_core", "resultquest_bdi2_total", "resultquest_scl90r_skagloba", "s.anxiety", "t.anxiety"))) %>%
+  arrange(variable) %>% 
+  mutate(variable = as.character(variable))
+
+demographics_HC <- demographics %>% filter(point_of_research %in% "HCW") %>%
+  dplyr::select(-point_of_research)
+
+demographics_T1 <- demographics %>% filter(point_of_research %in% "T1") %>%
+  dplyr::select(-point_of_research) %>%
+  full_join(demographics_HC, by="variable") %>%
+  mutate(variables_group = dplyr::recode(variable, !!!variables_grouper, .default = "missing group"))
+```
+
+```{r ttests01, results="asis", message=FALSE, warning=FALSE}
+t.testdata <- m.data_age %>%
+  mutate(point_of_research = relevel(point_of_research, ref="HCW")) %>% # reference group = HC participants
+  left_join(stai, by="storage_name") %>%
+  left_join(redcap_analysis, by="storage_name") %>% 
+  distinct(storage_name, .keep_all=TRUE) %>%
+  dplyr::select(point_of_research, age_at_date_of_research, iq, bmi_at_date_of_research,
+                bmisds_at_date_of_research, minbmi, leptin, e_tiv, subcort_gray, edi_core,
+                resultquest_bdi2_total, resultquest_scl90r_skagloba, s.anxiety, t.anxiety) %>%
+  pivot_longer(-point_of_research, names_to = "variable", values_to = "value") %>% 
+  nest(data = -variable)
+  
+t.testdatatable <- t.testdata %>% 
+  mutate(
+     ttest = map(data, ~ t.test(value ~ point_of_research, data = .x, na.action=na.omit,
+                                paired=FALSE, alternative="two.sided", var.equal=FALSE)), # listwise exclusion of missing values; paired=FALSE means independent samples t-tests; two-sided t-tests; equal variances not assumed => Welch approximation
+    tidied = map(ttest, tidy)) %>%
+  unnest(tidied) %>%
+  dplyr::select(variable, method, statistic, p.value) %>%
+  mutate(variables_group = dplyr::recode(variable, !!!variables_grouper,
+                                       .default = "missing group"))
+```
+
+```{r ttestsjoin, results="asis", message=FALSE, warning=FALSE}
+demographics_T1 %>%
+  dplyr::select(-c(min.x, max.x, min.y, max.y)) %>%
+  left_join(t.testdatatable, by=c("variable", "variables_group")) %>%
+  mutate(variable.labelled = labeller.function(variable)) %>%
+  dplyr::select(variable.labelled, everything()) %>%
+  mutate(mean.x = ifelse(variable %in% c("e_tiv", "subcort_gray"),
+                         formatC(mean.x, format="f", big.mark=",", digits=0),
+                         formatC(mean.x, format="f", digits=2))) %>%
+  mutate(mean.y = ifelse(variable %in% c("e_tiv", "subcort_gray"),
+                         formatC(mean.y, format="f", big.mark=",", digits=0),
+                         formatC(mean.y, format="f", digits=2))) %>%
+  mutate(sd.x = ifelse(variable %in% c("e_tiv", "subcort_gray"),
+                         formatC(sd.x, format="f", big.mark=",", digits=0),
+                         formatC(sd.x, format="f", digits=2))) %>%
+  mutate(sd.y = ifelse(variable %in% c("e_tiv", "subcort_gray"),
+                         formatC(sd.y, format="f", big.mark=",", digits=0),
+                         formatC(sd.y, format="f", digits=2))) %>%
+  mutate(df = ifelse(variable != "log_leptin", (n.x+n.y)-2, NA)) %>% 
+  unite("N", c(n.x, n.y), sep = " / ", remove = FALSE, na.rm = FALSE) %>%
+  unite("mean_sd_AN", c(mean.x, sd.x), sep = " ± ", remove = FALSE, na.rm = FALSE) %>%
+  unite("mean_sd_HC", c(mean.y, sd.y), sep = " ± ", remove = FALSE, na.rm = FALSE) %>%
+  mutate(p.value_formatted = formatC(p.value, format="f", digits=3)) %>%
+  mutate(p.value_formatted = ifelse(p.value<0.001, "<0.001", p.value_formatted)) %>%
+  dplyr::select(variable.labelled, N, mean_sd_AN, mean_sd_HC, statistic, df, p.value_formatted) %>% # Method = Welch Two-Sample t-test (unequal variances)
+  knitr::kable(format = "html", digits=2, col.names = c("", "AN / HC", "AN", "HC", "t", "df", "p"), align = "l", caption = "Table 1. Demographic variables and clinical measures") %>%
+  kable_paper(bootstrap_options="striped", full_width=FALSE, position="left", html_font="Arial", font_size="9") %>%
+  add_header_above(c("", "n", "Sample"=2, "Analyses"=3), align="l") %>% 
+  pack_rows(index = table(fct_inorder(demographics_T1$variables_group)))
+```
+
+# Amygdala volumes in acAN and HC
+```{r descriptivesamygdala, results="asis", message=FALSE, warning=FALSE}
+glmdata <- m.data_age %>% 
+  mutate(age_squared = age_at_date_of_research^2) %>%
+  filter(analysis %in% "amygdala") %>%
+  mutate(region = dplyr::recode(region,
+                               "Accessory-Basal-nucleus" = "Accessory_basal_nucleus",
+                               "Anterior-amygdaloid-area-AAA" = "Anterior_amygdaloid_area",
+                               "Basal-nucleus" = "Basal_nucleus",
+                               "Central-nucleus" = "Central_nucleus",
+                               "Cortical-nucleus" = "Cortical_nucleus",
+                               "Corticoamygdaloid-transitio" = "Corticoamygdaloid_transitio",
+                               "Lateral-nucleus" = "Lateral_nucleus",
+                               "Medial-nucleus" = "Medial_nucleus",
+                               "Paralaminar-nucleus" = "Paralaminar_nucleus")) %>%
+  mutate(region_recoded = dplyr::recode(region,
+                                        "Whole_amygdala" = "Whole amygdala",
+                                        "Accessory_basal_nucleus" = "Accessory basal nucleus",
+                                        "Anterior_amygdaloid_area" = "Anterior amygdaloid area",
+                                        "Basal_nucleus" = "Basal nucleus",
+                                        "Central_nucleus" = "Central nucleus",
+                                        "Cortical_nucleus" = "Cortical nucleus",
+                                        "Corticoamygdaloid_transitio" = "Corticoamygdaloid transition",
+                                        "Lateral_nucleus" = "Lateral nucleus",
+                                        "Medial_nucleus" = "Medial nucleus",
+                                        "Paralaminar_nucleus" = "Paralaminar nucleus")) %>%
+  unite("hemi_region", c(hemi, region), sep = "_", remove = FALSE, na.rm = FALSE) %>%
+  unite("labeller", c(region_recoded, hemi), sep= " ", remove = FALSE, na.rm = FALSE) %>% 
+  mutate(hemi_region = factor(hemi_region, levels=c("lh_Whole_amygdala", "rh_Whole_amygdala", "lh_Accessory_basal_nucleus", "rh_Accessory_basal_nucleus", "lh_Anterior_amygdaloid_area", "rh_Anterior_amygdaloid_area", "lh_Basal_nucleus", "rh_Basal_nucleus", "lh_Central_nucleus", "rh_Central_nucleus", "lh_Cortical_nucleus", "rh_Cortical_nucleus", "lh_Corticoamygdaloid_transitio", "rh_Corticoamygdaloid_transitio", "lh_Lateral_nucleus", "rh_Lateral_nucleus", "lh_Medial_nucleus", "rh_Medial_nucleus", "lh_Paralaminar_nucleus", "rh_Paralaminar_nucleus")))
+
+variables_grouper.glm <- c(lh_Whole_amygdala = "Whole amygdala",
+                           rh_Whole_amygdala = "Whole amygdala", 
+                           lh_Accessory_basal_nucleus = "Amygdala nuclei", 
+                           rh_Accessory_basal_nucleus = "Amygdala nuclei",
+                           lh_Anterior_amygdaloid_area = "Amygdala nuclei", 
+                           rh_Anterior_amygdaloid_area = "Amygdala nuclei", 
+                           lh_Basal_nucleus = "Amygdala nuclei", 
+                           rh_Basal_nucleus = "Amygdala nuclei", 
+                           lh_Central_nucleus = "Amygdala nuclei", 
+                           rh_Central_nucleus = "Amygdala nuclei", 
+                           lh_Cortical_nucleus = "Amygdala nuclei", 
+                           rh_Cortical_nucleus = "Amygdala nuclei", 
+                           lh_Corticoamygdaloid_transitio = "Amygdala nuclei", 
+                           rh_Corticoamygdaloid_transitio = "Amygdala nuclei", 
+                           lh_Lateral_nucleus = "Amygdala nuclei", 
+                           rh_Lateral_nucleus = "Amygdala nuclei", 
+                           lh_Medial_nucleus = "Amygdala nuclei", 
+                           rh_Medial_nucleus = "Amygdala nuclei",
+                           lh_Paralaminar_nucleus = "Amygdala nuclei", 
+                           rh_Paralaminar_nucleus = "Amygdala nuclei")
+
+descramygdala <- glmdata %>% 
+  group_by(point_of_research, region, hemi_region, labeller) %>%
+  rstatix::get_summary_stats(measure) %>%
+  dplyr::select(region, hemi_region, labeller, point_of_research, n, mean, sd, min, max)
+
+descramygdala_T1 <- descramygdala %>% filter(point_of_research %in% "T1") %>%
+  dplyr::select(-c(point_of_research, region))
+
+descramygdala_HC <- descramygdala %>% filter(point_of_research %in% "HCW") %>%
+  dplyr::select(-c(point_of_research, region))
+
+descramygdala_join <- full_join(descramygdala_T1, descramygdala_HC, by=c("hemi_region", "labeller")) %>%
+  arrange(hemi_region) %>%
+  mutate(hemi_region = as.character(hemi_region)) %>%
+  mutate(variables_group = dplyr::recode(hemi_region, !!!variables_grouper.glm, .default = "missing group"))
+  
+descramygdala_join %>%
+  mutate(mean.x = formatC(mean.x, format="f", big.mark=",", digits=2)) %>%
+  mutate(mean.y = formatC(mean.y, format="f", big.mark=",", digits=2)) %>%
+  mutate(sd.x = formatC(sd.x, format="f", digits=2)) %>%
+  mutate(sd.y = formatC(sd.y, format="f", digits=2)) %>%
+  mutate(min.x = formatC(min.x, format="f", big.mark=",", digits=2)) %>%
+  mutate(min.y = formatC(min.y, format="f", big.mark=",", digits=2)) %>%
+  mutate(max.x = formatC(max.x, format="f", big.mark=",", digits=2)) %>%
+  mutate(max.y = formatC(max.y, format="f", big.mark=",", digits=2)) %>%
+  unite("N", c(n.x, n.y), sep = "/", remove = FALSE, na.rm = FALSE) %>%
+  unite("mean_sd_AN", c(mean.x, sd.x), sep = " ± ", remove = FALSE, na.rm = FALSE) %>%
+  unite("mean_sd_HC", c(mean.y, sd.y), sep = " ± ", remove = FALSE, na.rm = FALSE) %>%
+  unite("range_AN", c(min.x, max.x), sep = " – ", remove = FALSE, na.rm = FALSE) %>%
+  unite("range_HC", c(min.y, max.y), sep = " – ", remove = FALSE, na.rm = FALSE) %>%
+  dplyr::select(labeller, N, mean_sd_AN, range_AN, mean_sd_HC, range_HC) %>%
+  knitr::kable(format = "html", digits=2, col.names = c("Raw volumes in mm^3", "acAN/HC", "Mean ± SD", "Range (min – max)", "Mean ± SD", "Range (min – max)"), align = "l", caption = "Descriptive statistics of raw amygdala volumes (whole amygdala and nuclei) in acAN and age-matched HC") %>%
+  kable_paper(bootstrap_options="striped", full_width=FALSE, position="left", html_font="Arial",
+              font_size="10") %>%
+  add_header_above(c("", "n", "acAN"=2, "HC"=2)) %>%
+  add_header_above(c("","", "Sample"=4)) %>%
+  pack_rows(index = table(fct_inorder(descramygdala_join$variables_group)))
+```
+
+# Histograms and raincloud plots
+```{r figuresettings01, results='hide', include=TRUE, message=FALSE, warning=FALSE}
+plot_theme_transparent2= theme(plot.title = element_text(size=32, face="bold"), 
+                   strip.text = element_text(size=22.5), 
+                   strip.text.x = element_text(size=22.5),
+                   axis.text.y = element_text(size=32),
+                   axis.text.x = element_text(size=40),
+                   axis.title = element_text(size=32), 
+                   axis.line = element_line(color = "black"), 
+                   panel.background = element_rect(fill="transparent"), 
+                   plot.background = element_rect(fill="transparent", color=NA), 
+                   panel.border = element_blank(),
+                   panel.grid.major = element_blank(), 
+                   panel.grid.minor = element_blank(), 
+                   strip.background = element_rect(color=NA, fill="grey90"))
+``` 
+
+```{r figuresettings02, results='hide', include=TRUE, message=FALSE, warning=FALSE}
+plot_theme_transparent3 = theme(plot.title = element_text(size=26, face="bold"), 
+                                strip.text = element_text(size=26),
+                                strip.text.x = element_text(size=26),
+                   axis.text.y = element_text(size=30),
+                   axis.text.x = element_text(size=40),
+                   axis.title = element_text(size=30), 
+                   axis.line = element_line(color = "black"), 
+                   panel.background = element_rect(fill="transparent"), 
+                   plot.background = element_rect(fill="transparent", color=NA), 
+                   panel.border = element_blank(),
+                   panel.grid.major = element_blank(), 
+                   panel.grid.minor = element_blank(), 
+                  strip.background = element_rect(color=NA, fill="grey90"))
+``` 
+
+```{r figurehistoamy, fig.cap="Histograms with normal curves for amygdala (nuclei) volumes", echo=TRUE, include=TRUE, message=FALSE, warning=FALSE}
+histos <- glmdata  %>%
+  group_by(hemi_region) %>% arrange(hemi_region, .by_group=TRUE) %>%
+  mutate(point_of_research = dplyr::recode(point_of_research,
+                                    "T1" = "AN",
+                                    "HCW" = "HC"))
+
+plotlist = list()
+
+bins <- 20
+
+for (Hemi_Region in unique(histos$hemi_region)) {
+  
+  histdata <- histos %>% filter(hemi_region %in% Hemi_Region) 
+  
+    bw <- histdata %>% # individual binwidths per plot depending on the measure range
+    dplyr::summarize(bw = (max(measure) - min(measure))/bins) %>%
+    pull(bw)
+  
+    mean_sd_T1 <- histdata %>% filter(point_of_research %in% "AN")
+  
+    mean_sd_HC <- histdata %>% filter(point_of_research %in% "HC")
+  
+    amyghist <- histdata %>%
+      ggplot(aes(x=measure, group=point_of_research, fill=point_of_research)) +
+      geom_histogram(aes(group=point_of_research, y=..count..), binwidth=bw, alpha=0.7, position="identity") +
+      stat_function(color="grey20", size=1.5, fun = function(x, mean, sd, n, bw)
+        {bw * n * dnorm(x = x, mean = mean, sd = sd)},
+        args=with(mean_sd_T1, c(mean = mean(measure), sd = sd(measure), n = length(measure), bw=bw))) +
+      stat_function(color="darkorange4", size=1.5, fun = function(x, mean, sd, n, bw)
+        {bw * n * dnorm(x = x, mean = mean, sd = sd)},
+        args=with(mean_sd_HC, c(mean = mean(measure), sd = sd(measure), n = length(measure), bw=bw))) +
+      scale_fill_jama() +
+      plot_theme_transparent3 +
+      scale_x_continuous(breaks = pretty_breaks(n=3), labels = scales::comma_format(big.mark = ",",
+                                                                                  decimal.mark = ".",
+                                                                                  accuracy=1L)) +
+      theme(axis.title.x = element_blank(), axis.title.y = element_blank(), axis.ticks.y = 
+            element_line(size=1.5), axis.ticks.x = element_line(size=1.5), 
+          axis.ticks.length.y=unit(.25, "cm"), axis.ticks.length.x=unit(.25, "cm")) +
+      theme(legend.position = "none") +
+      facet_wrap(~ labeller, labeller = label_wrap_gen(width=15))
+      
+      plotlist[[Hemi_Region]] = amyghist
+  
+  }
+
+histo.whole.lh <- plotlist$lh_Whole_amygdala
+histo.whole.rh <- plotlist$rh_Whole_amygdala
+histos.nuclei <- plotlist[3:20] 
+
+histoarrange <- ggarrange(histo.whole.lh, histo.whole.rh,
+                          ggarrange(plotlist=histos.nuclei, ncol=6, nrow=3),
+                          ncol=3, widths=c(1,1,4)) %>%
+  annotate_figure(bottom = text_grob(expression(paste("Volumes (raw) in mm"^"3")), size=36),
+                left = text_grob("Counts", size=36, rot=90),
+                right = text_grob("", size=36, rot=270))
+
+ggsave(histoarrange, path="figures", filename="histograms_amy.png", width=40, height=25, dpi=400)
+```
+
+```{r figureraincloud, fig.cap="Raincloud plots - combined visualization of distribution, raw data and boxplots for amygdala volumes of acAN-T1 and HC participants", echo=TRUE, message=FALSE, warning=FALSE}
+rcdata <- glmdata %>%
+  group_by(region) %>% arrange(region, .by_group=TRUE) %>%
+  mutate(point_of_research = dplyr::recode(point_of_research,
+                                    "T1" = "AN",
+                                    "HCW" = "HC")) %>%
+  mutate(xlabels = ifelse(region %in% c("Whole_amygdala", "Lateral_nucleus", "Medial_nucleus", "Paralaminar_nucleus"),
+                          TRUE, FALSE))
+
+plotlist = list()
+
+for (Region in unique(rcdata$region)) {
+  
+  plotdata <- rcdata %>% filter(region %in% Region)
+
+  rainclouds <- plotdata %>%
+    ggplot(aes(x = point_of_research, y = measure, fill = point_of_research, 
+             color = point_of_research)) +
+    geom_flat_violin(position = position_nudge(x = 0.2, y = 0), adjust = 0.8, trim = FALSE, 
+                     alpha=0.7, color=NA) +
+    geom_point(aes(x = as.numeric(point_of_research) - 0.1, y=measure),
+               position = position_jitter(width = 0.15), size = 0.9) +
+    stat_boxplot(aes(x = as.numeric(point_of_research) + 0.2, y = measure), geom="errorbar",
+               width=0.2, size=0.9, position=position_dodge(1), color = "BLACK", alpha=0.9) +
+    geom_boxplot(aes(x = as.numeric(point_of_research) + 0.2, y = measure), outlier.shape=NA,
+               width = 0.2, position=position_dodge(1), color = "BLACK", alpha=0.9, size=1.2, fatten=1.35) +
+    scale_fill_jama() + scale_color_jama() +
+    plot_theme_transparent2 + 
+    scale_y_continuous(breaks = pretty_breaks(n=3), labels = scales::comma_format(big.mark = ",",
+                                                                                  decimal.mark = ".",
+                                                                                  accuracy=1L)) +
+    theme(axis.title.x = element_blank(), axis.title.y = element_blank(), axis.ticks.y = 
+            element_line(size=1.5), axis.ticks.x = element_line(size=1.5), 
+          axis.ticks.length.y=unit(.25, "cm"), axis.ticks.length.x=unit(.25, "cm")) +
+    guides(fill = FALSE, color = FALSE) +
+    facet_wrap(~ labeller, scales="free_x", labeller = label_wrap_gen(width=15))
+  
+  if(plotdata$xlabels == FALSE) {
+   rainclouds = rainclouds + 
+     theme(axis.text.x=element_blank(), axis.ticks.x=element_blank())
+   }
+  
+ plotlist[[Region]] = rainclouds
+ 
+}
+
+rc.whole <- plotlist$Whole_amygdala
+rc.nuclei <- plotlist[1:9] 
+
+raincloudarrange <- ggarrange(rc.whole, 
+          ggarrange(plotlist=rc.nuclei, ncol=3, nrow=3),
+          ncol=2, widths=c(1,2)) %>%
+  annotate_figure(left = text_grob(expression(paste("Volumes (raw) in mm"^"3")), size=32, rot=90))
+
+raincloudarrange
+
+#ggsave(raincloudarrange, path="figures", filename="raincloud_amy.png", width=30, height=25, dpi=400)
+```
+
+# Preliminary model (GLMs 1): GLMs adjusted for eTIV
+
+```{r glmamygdalaetiv, results="asis", message=FALSE, warning=FALSE}
+options(contrasts = c("contr.sum", "contr.poly")) # needed for type III SS tests (ANOVA, does not change Type I or II SS results)
+
+asterisk_function <- function(x) {
+  ifelse(is.na(x), NA, 
+  symnum(x, corr=FALSE, na = FALSE, legend = FALSE,
+         cutpoints = c(0, 0.001, 0.01, 0.05, 1), 
+         symbols = c("* * *", "* *", "*", "ns"))
+  )
+}
+
+ancova.etiv <- glmdata %>%
+  mutate(point_of_research = relevel(point_of_research, ref="HCW")) %>%
+  nest(data = - c(hemi_region, labeller, region)) %>%
+  mutate(
+    lm = map(data, ~ lm(measure ~ point_of_research + poly(age_at_date_of_research, degree = 2, raw = FALSE) + e_tiv, # use orthogonal polynomials (raw = FALSE) for linear and quadratic age effects
+                        data = .x, na.action = na.omit)),
+    adj.means = map(lm, ~ emmeans(.x, "point_of_research", type="response")),
+    tidymeans = map(adj.means, tidy),
+    anova = map(lm, ~ car::Anova(.x, type="III", test.statistic="F")),
+    anova_stats = map(anova, ~ sjstats::anova_stats(.x, digits=5))) %>%
+  unnest(anova_stats) %>%
+  mutate(whole.sub = ifelse(region %in% "Whole_amygdala", "whole", "subregion")) %>%
+  group_by(whole.sub, term) %>%
+  mutate(p.adj = p.adjust(p.value, method="fdr")) %>%
+  mutate(p.adj = as.numeric(p.adj)) %>%
+  mutate(adj.signif = as.character(asterisk_function(p.adj))) %>%
+  ungroup() %>%
+  filter(term %in% "point_of_research") %>%
+  dplyr::select(region, hemi_region, labeller, tidymeans, term, sumsq, df, statistic, p.value, p.adj, 
+                adj.signif, partial.etasq) %>%
+  arrange(hemi_region)
+
+ancova.etiv %>% 
+  dplyr::select(labeller, term, statistic, p.value, p.adj) %>% 
+  knitr::kable(format = "html", digits=3, col.names = c("Amygdala (sub)region", "Term", "F statistic", "p (raw)", "p (FDR-adj)"), align = "l", caption = "ANOVA results for eTIV-adjusted GLMs including orthogonal polynomial (linear + non-linear/quadratic) age effects") %>%
+  kable_paper(bootstrap_options="striped", full_width=FALSE, position="left", html_font="Arial",
+              font_size="10")
+
+emmeans.etiv <- ancova.etiv %>%
+  dplyr::select(hemi_region, region, labeller, tidymeans) %>%
+  unnest(tidymeans) %>% 
+  dplyr::select(hemi_region, region, labeller, point_of_research, estimate, std.error)
+``` 
+
+```{r effectsetiv, results="asis", message=FALSE, warning=FALSE}
+ancova.etiv %>%
+  filter(p.adj < 0.05) %>%
+  mutate(partial.etasq = formatC(partial.etasq, format="f", digits=3)) %>%
+  unite("effectsize", c(labeller, partial.etasq), sep = ", ", remove = FALSE, na.rm = FALSE) %>%
+  summarize(effects = paste(effectsize, collapse="; ")) %>%
+  knitr::kable(format = "html", col.names = c("GLM effect size statistics (eTIV, only significant nuclei)"), align = "l") %>%
+  kable_paper(bootstrap_options="striped", full_width=FALSE, position="left", html_font="Arial", font_size="10") 
+```
+
+```{r figurebarplotetiv, fig.cap="Barplots for preliminary GLM (only eTIV)", echo=TRUE, message=FALSE, warning=FALSE}
+bardata.etiv <- emmeans.etiv %>%
+  group_by(region) %>% arrange(region, .by_group=TRUE) %>%
+  mutate(point_of_research = dplyr::recode(point_of_research,
+                                    "T1" = "AN",
+                                    "HCW" = "HC")) %>%
+  mutate(xlabels = ifelse(region %in% c("Whole_amygdala", "Lateral_nucleus", "Medial_nucleus", "Paralaminar_nucleus"), TRUE, FALSE))
+
+y.position.bar <- emmeans.etiv %>% 
+  group_by(region) %>%
+  arrange(desc(estimate), .by_group=TRUE) %>% 
+  slice_head(n = 1) %>%
+  mutate(ymin = round((0.90*estimate)-5, -1)) %>%
+  mutate(ymax = round((1.05*estimate)+5, -1)) %>%
+  mutate(y.position = (0.85*(ymax-ymin))+ymin) %>%
+  dplyr::select(region, y.position, ymin, ymax) %>%
+  ungroup()
+
+plotlist = list()
+
+for (Region in unique(bardata.etiv$region)) {
+  
+  plotdata <- bardata.etiv %>% filter(region %in% Region)
+  
+  pvalues <- ancova.etiv %>%
+    filter(term %in% "point_of_research") %>%
+    filter(region %in% Region) %>%
+    rename(point_of_research = term) %>%
+    dplyr::select(region, hemi_region, labeller, point_of_research, adj.signif) %>%
+    left_join(y.position.bar, by="region") %>%
+    mutate(xmin = 1) %>%
+    mutate(xmax = 2)
+  
+   effsize <- ancova.etiv %>%
+    filter(term %in% "point_of_research") %>%
+    filter(region %in% Region) %>%
+    rename(point_of_research = term) %>%
+    dplyr::select(region, hemi_region, labeller, point_of_research, partial.etasq) %>%
+    left_join(y.position.bar, by="region") %>%
+    mutate(label = "η[p]^2") %>%
+    mutate(partial.etasq_formatted = ifelse(partial.etasq < 0.001, "<0.001", 
+                                            as.character(formatC(partial.etasq, format="f", digits=3,
+                                                                 drop0trailing=FALSE)))) %>%
+    mutate(y.position.eff = ymax) %>%
+    mutate(x.position.label = 0.65) %>%
+    mutate(x.position.eff = 1.24)
+
+  yaxis <- y.position.bar %>%
+    filter(region %in% Region)
+  
+  barplots <- plotdata %>%
+    ggplot(aes(x=point_of_research, y=estimate, fill = point_of_research, color = point_of_research)) +
+    geom_col(stat="identity", color=NA, position=position_dodge()) +
+    geom_errorbar(aes(ymin=estimate-std.error, ymax=estimate+std.error), width=0.2, 
+                  size=1.0, color = "BLACK", position=position_dodge(1)) +
+    geom_signif(data=pvalues, aes(annotations = adj.signif, y_position = y.position, 
+                                  xmin = xmin, xmax = xmax), 
+              tip_length = 0.09, textsize=14, vjust=-0.1, color = "BLACK", manual = TRUE) +
+    geom_text(data=effsize, aes(label = label, x = x.position.label, y = y.position.eff),
+              size = 9, color = "gray40", parse = TRUE) +
+    geom_text(data=effsize, aes(label = partial.etasq_formatted, x = x.position.eff, y = y.position.eff),
+              size = 9, color = "gray40", parse = FALSE) +
+    coord_cartesian(ylim=c(yaxis$ymin, yaxis$ymax)) +
+    scale_fill_jama(alpha=0.8) + scale_color_jama(alpha=0.8) +
+    plot_theme_transparent2 + 
+    scale_y_continuous(breaks = pretty_breaks(n=3), labels = scales::comma_format(big.mark = ",",
+                                                                                  decimal.mark = ".",
+                                                                                  accuracy=1L)) +
+    theme(axis.title.x = element_blank(), axis.title.y = element_blank(), axis.ticks.y = 
+            element_line(size=1.5), axis.ticks.x = element_line(size=1.5), 
+          axis.ticks.length.y=unit(.25, "cm"), axis.ticks.length.x=unit(.25, "cm")) +
+    guides(fill = FALSE, color = FALSE) +
+    facet_wrap(~ labeller, scales="free_x", labeller = label_wrap_gen(width=15))
+  
+  if(plotdata$xlabels == FALSE) {
+   barplots = barplots + 
+     theme(axis.text.x=element_blank(), axis.ticks.x=element_blank())
+   }
+  
+ plotlist[[Region]] = barplots
+ 
+}
+
+bp.whole.etiv <- plotlist$Whole_amygdala
+bp.nuclei.etiv <- plotlist[1:9] 
+
+barplotarrange.etiv <- ggarrange(bp.whole.etiv, 
+          ggarrange(plotlist=bp.nuclei.etiv, ncol=3, nrow=3),
+          ncol=2, widths=c(1,2)) %>%
+  annotate_figure(left = text_grob(expression(paste("Volumes (EMM ± SEM) in mm"^"3")), size=32, rot=90))
+
+barplotarrange.etiv
+
+ggsave(barplotarrange.etiv, path="figures", filename="barplots_amy_glm_etiv.png", width=30, height=27, dpi=400)
+```
+
+
+# Main model 1: GLMs adjusted for whole amygdala volume
+
+```{r glmamygdalawhole, results="asis", message=FALSE, warning=FALSE}
+ancova.whole <- m.data_age %>%
+  filter(region %in% "Whole_amygdala") %>%
+  dplyr::select(storage_name, hemi, measure) %>%
+  rename(whole_amygdala = measure) %>% 
+  right_join(glmdata, by=c("storage_name", "hemi")) %>%
+  filter(region != "Whole_amygdala") %>%
+  mutate(point_of_research = relevel(point_of_research, ref="HCW")) %>%
+  nest(data = - c(hemi_region, labeller, region)) %>%
+  mutate(
+    lm = map(data, ~ lm(measure ~ point_of_research + poly(age_at_date_of_research, degree = 2, raw = FALSE) + 
+                          e_tiv + whole_amygdala,
+                        data = .x, na.action = na.omit)),
+    adj.means = map(lm, ~ emmeans(.x, "point_of_research", type="response")), # original scale for emmeans, no transformation
+    tidymeans = map(adj.means, tidy),
+    anova = map(lm, ~ car::Anova(.x, type="III", test.statistic="F")), 
+    anova_stats = map(anova, ~ sjstats::anova_stats(.x, digits=5))) %>%
+  unnest(anova_stats) %>%
+  mutate(whole.sub = ifelse(region %in% "Whole_amygdala", "whole", "subregion")) %>%
+  group_by(whole.sub, term) %>% # if separate p.value adjustment (GLM1; GLM2) is required later
+  mutate(p.adj = p.adjust(p.value, method="fdr")) %>%
+  mutate(p.adj = as.numeric(p.adj)) %>%
+  mutate(adj.signif = as.character(asterisk_function(p.adj))) %>%
+  ungroup() %>%
+  filter(term %in% "point_of_research") %>%
+  dplyr::select(region, hemi_region, whole.sub, tidymeans, labeller, term, 
+                sumsq, df, statistic, p.value, p.adj, adj.signif, partial.etasq) %>%
+  arrange(hemi_region)
+
+emmeans.whole <- ancova.whole %>%
+  dplyr::select(hemi_region, region, labeller, tidymeans) %>%
+  unnest(tidymeans) %>% # standard errors are equal across groups due to balanced design
+  dplyr::select(hemi_region, region, labeller, point_of_research, estimate, std.error)
+
+p.adjust.whole <- ancova.whole %>%
+  mutate(main_glm = "GLM 1") %>%
+  rename(point_of_research = term) %>%
+  dplyr::select(main_glm, region, hemi_region, labeller, point_of_research, whole.sub, p.value)
+``` 
+
+# Main model 2: GLMs adjusted for subcortical gray matter volume
+
+```{r glmamygdalasubcortgm, results="asis", message=FALSE, warning=FALSE}
+ancova.subcortgm <- glmdata %>%
+  mutate(point_of_research = relevel(point_of_research, ref="HCW")) %>% # reference group = HC participants
+  nest(data = - c(hemi_region, labeller, region)) %>%
+  mutate(
+    lm = map(data, ~ lm(measure ~ point_of_research + poly(age_at_date_of_research, degree = 2, raw = FALSE) + 
+                           e_tiv + subcort_gray, 
+                        data = .x, na.action = na.omit)),
+    adj.means = map(lm, ~ emmeans(.x, "point_of_research", type="response")),
+    tidymeans = map(adj.means, tidy),
+    anova = map(lm, ~ car::Anova(.x, type="III", test.statistic="F")),
+    anova_stats = map(anova, ~ sjstats::anova_stats(.x, digits=5))) %>%
+  unnest(anova_stats) %>%
+  mutate(whole.sub = ifelse(region %in% "Whole_amygdala", "whole", "subregion")) %>%
+  group_by(whole.sub, term) %>%
+  mutate(p.adj = p.adjust(p.value, method="fdr")) %>%
+  mutate(p.adj = as.numeric(p.adj)) %>%
+  mutate(adj.signif = as.character(asterisk_function(p.adj))) %>%
+  ungroup() %>%
+  filter(term %in% "point_of_research") %>%
+  dplyr::select(region, hemi_region, whole.sub, labeller, tidymeans, term, sumsq, df, 
+                statistic, p.value, p.adj, adj.signif, partial.etasq) %>%
+  arrange(hemi_region)
+
+emmeans.subcortgm <- ancova.subcortgm %>%
+  dplyr::select(hemi_region, region, labeller, tidymeans) %>%
+  unnest(tidymeans) %>% # standard errors are equal across groups due to balanced design
+  dplyr::select(hemi_region, region, labeller, point_of_research, estimate, std.error)
+
+p.adjust.subcortgm <- ancova.subcortgm %>%
+  mutate(main_glm = "GLM 2") %>%
+  rename(point_of_research = term) %>%
+  dplyr::select(main_glm, region, hemi_region, labeller, point_of_research, whole.sub, p.value)
+``` 
+
+```{r padjustglm, results="asis", message=FALSE, warning=FALSE}
+p.combiadjust <- bind_rows(p.adjust.whole, p.adjust.subcortgm) %>%
+  group_by(whole.sub) %>%
+  mutate(p.adj.combi = p.adjust(p.value, method="fdr")) %>%
+  mutate(p.adj.combi = as.numeric(p.adj.combi)) %>%
+  mutate(adj.signif.combi = as.character(asterisk_function(p.adj.combi)))  %>%
+  ungroup()
+
+ancova.whole.fdr <- p.combiadjust %>%
+  filter(main_glm == "GLM 1") %>%
+  dplyr::select(hemi_region, p.adj.combi, adj.signif.combi) %>%
+  full_join(ancova.whole, by="hemi_region")
+
+ancova.subcortgm.fdr <- p.combiadjust %>%
+  filter(main_glm == "GLM 2") %>%
+  dplyr::select(hemi_region, p.adj.combi, adj.signif.combi) %>%
+  full_join(ancova.subcortgm, by="hemi_region")
+```
+
+# Effect size statistics of both main models
+Benchmarks for partial eta squared (Cohen, 1992): small effect - 0.01, medium effect - 0.06, large effect - 0.14.  
+```{r effectswhole, results="asis", message=FALSE, warning=FALSE}
+ancova.whole.fdr %>%
+  filter(p.adj.combi < 0.05) %>%
+  mutate(partial.etasq = formatC(partial.etasq, format="f", digits=3)) %>%
+  unite("effectsize", c(labeller, partial.etasq), sep = ", ", remove = FALSE, na.rm = FALSE) %>%
+  summarize(effects = paste(effectsize, collapse="; ")) %>%
+  knitr::kable(format = "html", col.names = c("GLM effect size statistics (whole amygdala, only significant nuclei)"), align = "l") %>%
+  kable_paper(bootstrap_options="striped", full_width=FALSE, position="left", html_font="Arial", font_size="10") 
+```
+
+```{r effectssubcortgm, results="asis", message=FALSE, warning=FALSE}
+ancova.subcortgm.fdr %>%
+  filter(p.adj.combi < 0.05) %>%
+  mutate(partial.etasq = formatC(partial.etasq, format="f", digits=3)) %>%
+  unite("effectsize", c(labeller, partial.etasq), sep = ", ", remove = FALSE, na.rm = FALSE) %>%
+  summarize(effects = paste(effectsize, collapse="; ")) %>%
+  knitr::kable(format = "html", col.names = c("GLM effect size statistics (subcortical gray matter, only significant nuclei)"), align = "l") %>%
+  kable_paper(bootstrap_options="striped", full_width=FALSE, position="left", html_font="Arial", font_size="10") 
+```
+
+# Graphs for main models
+```{r figurebarplotwhole, fig.cap="Barplots for main GLM 1 (whole amgygdala)", echo=TRUE, message=FALSE, warning=FALSE}
+bardata.whole <- emmeans.whole %>%
+  group_by(region) %>% arrange(region, .by_group=TRUE) %>%
+  mutate(point_of_research = dplyr::recode(point_of_research,
+                                    "T1" = "AN",
+                                    "HCW" = "HC")) %>%
+  mutate(xlabels = ifelse(region %in% c("Lateral_nucleus", "Medial_nucleus", "Paralaminar_nucleus"), 
+                          TRUE, FALSE))
+
+y.position.bar <- emmeans.whole %>% 
+  group_by(region) %>%
+  arrange(desc(estimate), .by_group=TRUE) %>% # y positions are regulated by maximum volume measure per region
+  slice_head(n = 1) %>%
+  mutate(ymin = round((0.90*estimate)-5, -1)) %>%
+  mutate(ymax = round((1.05*estimate)+5, -1)) %>%
+  mutate(y.position = (0.83*(ymax-ymin))+ymin) %>%
+  dplyr::select(region, y.position, ymin, ymax) %>%
+  ungroup()
+
+plotlist = list()
+
+for (Region in unique(bardata.whole$region)) {
+  
+  plotdata <- bardata.whole %>% filter(region %in% Region)
+  
+  pvalues <- p.combiadjust %>%
+    filter(main_glm %in% "GLM 1") %>%
+    filter(region %in% Region) %>%
+    dplyr::select(region, hemi_region, labeller, point_of_research, adj.signif.combi) %>%
+    left_join(y.position.bar, by="region") %>%
+    mutate(xmin = 1) %>%
+    mutate(xmax = 2) #%>%
+    #mutate(textsize = ifelse(p.adj<0.05, 8, 3))
+  
+   effsize <- ancova.whole %>%
+    filter(term %in% "point_of_research") %>%
+    filter(region %in% Region) %>%
+    rename(point_of_research = term) %>%
+    dplyr::select(region, hemi_region, labeller, point_of_research, partial.etasq) %>%
+    left_join(y.position.bar, by="region") %>%
+    mutate(label = "η[p]^2") %>%
+    mutate(partial.etasq_formatted = ifelse(partial.etasq < 0.001, "<0.001", 
+                                            as.character(formatC(partial.etasq, format="f", digits=3,
+                                                                 drop0trailing=FALSE)))) %>%
+    mutate(y.position.eff = ymax) %>%
+    mutate(x.position.label = 0.65) %>%
+    mutate(x.position.eff = 1.15)
+
+  yaxis <- y.position.bar %>%
+    filter(region %in% Region)
+  
+  barplots <- plotdata %>%
+    ggplot(aes(x=point_of_research, y=estimate, fill = point_of_research, color = point_of_research)) +
+    geom_col(stat="identity", color=NA, position=position_dodge()) +
+    geom_errorbar(aes(ymin=estimate-std.error, ymax=estimate+std.error), width=0.2, 
+                  size=1.0, color = "BLACK", position=position_dodge(1)) +
+    geom_signif(data=pvalues, aes(annotations = adj.signif.combi, y_position = y.position, 
+                                  xmin = xmin, xmax = xmax), 
+              tip_length = 0.09, textsize=14, vjust=-0.1, color = "BLACK", manual = TRUE) +
+    geom_text(data=effsize, aes(label = label, x = x.position.label, y = y.position.eff),
+              size = 9, color = "gray40", parse = TRUE) +
+    geom_text(data=effsize, aes(label = partial.etasq_formatted, x = x.position.eff, y = y.position.eff),
+              size = 9, color = "gray40", parse = FALSE) +
+    coord_cartesian(ylim=c(yaxis$ymin, yaxis$ymax)) +
+    scale_fill_jama(alpha=0.8) + scale_color_jama(alpha=0.8) +
+    plot_theme_transparent2 + 
+    scale_y_continuous(breaks = pretty_breaks(n=3), labels = scales::comma_format(big.mark = ",",
+                                                                                  decimal.mark = ".",
+                                                                                  accuracy=1L)) +
+    theme(axis.title.x = element_blank(), axis.title.y = element_blank(), axis.ticks.y = 
+            element_line(size=1.5), axis.ticks.x = element_line(size=1.5), 
+          axis.ticks.length.y=unit(.25, "cm"), axis.ticks.length.x=unit(.25, "cm")) +
+    guides(fill = FALSE, color = FALSE) +
+    facet_wrap(~ labeller, scales="free_x", labeller = label_wrap_gen(width=15))
+  
+  if(plotdata$xlabels == FALSE) {
+   barplots = barplots + 
+     theme(axis.text.x=element_blank(), axis.ticks.x=element_blank())
+   }
+  
+ plotlist[[Region]] = barplots
+ 
+}
+
+bp.nuclei.whole <- plotlist[1:9] 
+
+barplotarrange.whole <- ggarrange(plotlist=bp.nuclei.whole, ncol=3, nrow=3) %>%
+  annotate_figure(left = text_grob(expression(paste("Volumes (EMM ± SEM) in mm"^"3")), size=32, rot=90))
+
+barplotarrange.whole
+
+ggsave(barplotarrange.whole, path="figures", filename="barplots_amy_glm_whole_amygdala.png", width=27, height=27, dpi=400)
+```
+
+```{r figurebarplotsubcortgm, fig.cap="Barplots for main GLM 2 (subcortical gray matter)", echo=TRUE, message=FALSE, warning=FALSE}
+bardata.subcortgm <- emmeans.subcortgm %>%
+  group_by(region) %>% arrange(region, .by_group=TRUE) %>%
+  mutate(point_of_research = dplyr::recode(point_of_research,
+                                    "T1" = "AN",
+                                    "HCW" = "HC")) %>%
+  mutate(xlabels = ifelse(region %in% c("Whole_amygdala", "Lateral_nucleus", "Medial_nucleus", "Paralaminar_nucleus"), TRUE, FALSE))
+
+y.position.bar <- emmeans.subcortgm %>% 
+  group_by(region) %>%
+  arrange(desc(estimate), .by_group=TRUE) %>% 
+  slice_head(n = 1) %>%
+  mutate(ymin = round((0.90*estimate)-5, -1)) %>%
+  mutate(ymax = round((1.05*estimate)+5, -1)) %>%
+  mutate(y.position = (0.85*(ymax-ymin))+ymin) %>%
+  dplyr::select(region, y.position, ymin, ymax) %>%
+  ungroup()
+
+plotlist = list()
+
+for (Region in unique(bardata.subcortgm$region)) {
+  
+  plotdata <- bardata.subcortgm %>% filter(region %in% Region)
+  
+  pvalues <- p.combiadjust %>%
+    filter(main_glm %in% "GLM 2") %>%
+    filter(region %in% Region) %>%
+    dplyr::select(region, hemi_region, labeller, point_of_research, adj.signif.combi) %>%
+    left_join(y.position.bar, by="region") %>%
+    mutate(xmin = 1) %>%
+    mutate(xmax = 2)
+  
+   effsize <- ancova.subcortgm %>%
+    filter(term %in% "point_of_research") %>%
+    filter(region %in% Region) %>%
+    rename(point_of_research = term) %>%
+    dplyr::select(region, hemi_region, labeller, point_of_research, partial.etasq) %>%
+    left_join(y.position.bar, by="region") %>%
+    mutate(label = "η[p]^2") %>%
+    mutate(partial.etasq_formatted = ifelse(partial.etasq < 0.001, "<0.001", 
+                                            as.character(formatC(partial.etasq, format="f", digits=3,
+                                                                 drop0trailing=FALSE)))) %>%
+    mutate(y.position.eff = ymax) %>%
+    mutate(x.position.label = 0.65) %>%
+    mutate(x.position.eff = 1.24)
+
+  yaxis <- y.position.bar %>%
+    filter(region %in% Region)
+  
+  barplots <- plotdata %>%
+    ggplot(aes(x=point_of_research, y=estimate, fill = point_of_research, color = point_of_research)) +
+    geom_col(stat="identity", color=NA, position=position_dodge()) +
+    geom_errorbar(aes(ymin=estimate-std.error, ymax=estimate+std.error), width=0.2, 
+                  size=1.0, color = "BLACK", position=position_dodge(1)) +
+    geom_signif(data=pvalues, aes(annotations = adj.signif.combi, y_position = y.position, 
+                                  xmin = xmin, xmax = xmax), 
+              tip_length = 0.09, textsize=14, vjust=-0.1, color = "BLACK", manual = TRUE) +
+    geom_text(data=effsize, aes(label = label, x = x.position.label, y = y.position.eff),
+              size = 9, color = "gray40", parse = TRUE) +
+    geom_text(data=effsize, aes(label = partial.etasq_formatted, x = x.position.eff, y = y.position.eff),
+              size = 9, color = "gray40", parse = FALSE) +
+    coord_cartesian(ylim=c(yaxis$ymin, yaxis$ymax)) +
+    scale_fill_jama(alpha=0.8) + scale_color_jama(alpha=0.8) +
+    plot_theme_transparent2 + 
+    scale_y_continuous(breaks = pretty_breaks(n=3), labels = scales::comma_format(big.mark = ",",
+                                                                                  decimal.mark = ".",
+                                                                                  accuracy=1L)) +
+    theme(axis.title.x = element_blank(), axis.title.y = element_blank(), axis.ticks.y = 
+            element_line(size=1.5), axis.ticks.x = element_line(size=1.5), 
+          axis.ticks.length.y=unit(.25, "cm"), axis.ticks.length.x=unit(.25, "cm")) +
+    guides(fill = FALSE, color = FALSE) +
+    facet_wrap(~ labeller, scales="free_x", labeller = label_wrap_gen(width=15))
+  
+  if(plotdata$xlabels == FALSE) {
+   barplots = barplots + 
+     theme(axis.text.x=element_blank(), axis.ticks.x=element_blank())
+   }
+  
+ plotlist[[Region]] = barplots
+ 
+}
+
+bp.whole.subcortgm <- plotlist$Whole_amygdala
+bp.nuclei.subcortgm <- plotlist[1:9] 
+
+barplotarrange.subcortgm <- ggarrange(bp.whole.subcortgm, 
+          ggarrange(plotlist=bp.nuclei.subcortgm, ncol=3, nrow=3),
+          ncol=2, widths=c(1,2)) %>%
+  annotate_figure(left = text_grob(expression(paste("Volumes (EMM ± SEM) in mm"^"3")), size=32, rot=90))
+
+barplotarrange.subcortgm
+
+ggsave(barplotarrange.subcortgm, path="figures", filename="barplots_amy_glm_subcort_gm.png", width=30, height=27, dpi=400)
+```
+
+# SM model 1: Hydration status (dehydration) and serum albumin levels in acAN
+
+```{r smhydration, include=TRUE, results="asis", message=FALSE, warning=FALSE}
+redcap_hydration <- redcap %>%
+  dplyr::select(storage_name, urine_specific_gravity, clinical_blood_results_serum_albumin)
+  
+hydration <- glmdata %>%
+  filter(point_of_research %in% "T1") %>%
+  left_join(redcap_hydration, by="storage_name") %>%
+  distinct(storage_name, .keep_all=TRUE) %>%
+  mutate(urine_specific_gravity = ifelse(urine_specific_gravity == 1012.000, 1.012, urine_specific_gravity)) # correct data entry error from Redcap import
+  
+hydration %>%
+  filter(urine_specific_gravity < 1.006) %>%
+  count(.) %>%
+  knitr::kable(format = "html", col.names = c("n(AN) with hyperhydration"), align = "l") %>%
+  kable_paper(bootstrap_options="striped", full_width=FALSE, position="left", html_font="Arial",
+              font_size="10")
+
+hydration %>%
+  filter(urine_specific_gravity > 1.020) %>%
+  count(.) %>%
+  knitr::kable(format = "html", col.names = c("n(AN) with dehydration"), align = "l") %>%
+  kable_paper(bootstrap_options="striped", full_width=FALSE, position="left", html_font="Arial",
+              font_size="10")
+
+hydration %>%
+  filter(clinical_blood_results_serum_albumin < 35) %>%
+  count(.) %>%
+  knitr::kable(format = "html", col.names = c("n(AN) with hypoalbuminemia"), align = "l") %>%
+  kable_paper(bootstrap_options="striped", full_width=FALSE, position="left", html_font="Arial",
+              font_size="10")
+
+hydration %>%
+  filter(clinical_blood_results_serum_albumin > 52) %>%
+  count(.) %>%
+  knitr::kable(format = "html", col.names = c("n(AN) with hyperalbuminemia"), align = "l") %>%
+  kable_paper(bootstrap_options="striped", full_width=FALSE, position="left", html_font="Arial",
+              font_size="10")
+
+hydration %>%
+  rstatix::get_summary_stats(urine_specific_gravity, clinical_blood_results_serum_albumin) %>%
+  dplyr::select(variable, n, mean, sd, min, max) %>%
+  mutate(across(.cols = c(mean, sd, min, max), ~ formatC(.x, format="f", digits=3))) %>% 
+  unite("mean_sd", c(mean, sd), sep = " ± ", remove = TRUE, na.rm = TRUE) %>%
+  unite("min_max", c(min, max), sep = "–", remove = TRUE, na.rm = TRUE) %>%
+  mutate(normal_range = ifelse(variable %in% "clinical_blood_results_serum_albumin", "35 - 52", "1.006 - 1.020")) %>%
+  mutate(variable = dplyr::recode(variable, 
+                                  "clinical_blood_results_serum_albumin" = "Serum albumin concentration (g/L)",
+                                  "urine_specific_gravity" = "Urine specific gravity")) %>%
+  knitr::kable(format = "html", col.names = c("Parameter", "n", "Mean ± SD", "Range (min–max)", "Reference range"), align = "l", caption = "Hydration status (via urine specific gravity) and colloidal osmotic pressure (via serum albumin concentration) in AN") %>%
+  kable_paper(bootstrap_options="striped", full_width=FALSE, position="left", html_font="Arial",
+              font_size="10") %>%
+  add_header_above(c("Urine specific gravity from first-morning specimens and serum albumin were collected one hour before scanning. Most AN patients (except for n = 5 with some signs of hyperhydration) had normal hydration status. Serum albumin was not reduced in AN."=5), align="l") 
+
+hydration_glm <- glmdata %>%
+  filter(point_of_research %in% "T1") %>%
+  left_join(redcap_hydration, by="storage_name") %>%
+  mutate(urine_specific_gravity = ifelse(urine_specific_gravity == 1012.000, 1.012, urine_specific_gravity)) %>%
+  nest(data = - c(hemi_region, labeller, region)) %>%
+  mutate(
+    lm = map(data, ~ lm(measure ~ urine_specific_gravity + poly(age_at_date_of_research, degree = 2, raw = FALSE) + 
+                          e_tiv, 
+                        data = .x, na.action = na.omit)),
+    anova = map(lm, ~ car::Anova(.x, type="III", test.statistic="F")), 
+    anova_stats = map(anova, ~ sjstats::anova_stats(.x, digits=5))) %>%
+  unnest(anova_stats) %>%
+  filter(term %in% c("urine_specific_gravity", "Residuals")) %>%
+  group_by(hemi_region) %>%
+  mutate(df = paste(df, collapse=",")) %>%
+  ungroup() %>%
+  filter(term %in% "urine_specific_gravity") %>%
+  mutate(whole.sub = ifelse(region %in% "Whole_amygdala", "whole", "subregion")) %>%
+  group_by(whole.sub) %>%
+  mutate(p.adj = p.adjust(p.value, method="fdr")) %>%
+  mutate(p.adj = as.numeric(p.adj)) %>%
+  mutate(adj.signif = as.character(asterisk_function(p.adj))) %>%
+  ungroup() %>%
+  mutate(p.value_formatted = formatC(p.value, format="f", digits=3)) %>%
+  mutate(p.adj_formatted = formatC(p.adj, format="f", digits=3)) %>%
+  arrange(hemi_region) %>%
+  mutate(variables_group = dplyr::recode(hemi_region, !!!variables_grouper.glm, .default = "missing group"))
+
+hydration_glm %>%
+ dplyr::select(labeller, statistic, df, p.value_formatted, p.adj_formatted, adj.signif) %>%
+  knitr::kable(format = "html", digits=2, col.names = c("Amygdala (sub)region", "F", "df", "p", "FDR-q", "Adj. signif."), align = "l", caption = "Age- and eTIV-adjusted GLMs in AN: Amygdala (nuclei) volumes in AN are independent of hydration status") %>%
+  kable_paper(bootstrap_options="striped", full_width=FALSE, position="left", html_font="Arial",
+              font_size="10") %>%
+  add_header_above(c("Hydration status was assessed via urine specific gravity approximately one hour before scanning. Hydration status was mostly normal in AN. Hydration status (acute dehydration has been shown to affect gray matter volume; Streitbuerger et al., 2012) is unlikely to serve as an explanation for amygdala (nuclei) volume alterations in AN in line with the findings of our previous papers on cortical thickness (Bernardoni et al., 2016) and gyrification (Bernardoni et al., 2018) in AN."=6), align="l") %>%
+  pack_rows(index = table(fct_inorder(hydration_glm$variables_group)))
+
+#albumin_glm <- glmdata %>%
+  #filter(point_of_research %in% "T1") %>%
+  #left_join(redcap_hydration, by="storage_name") %>%
+  #nest(data = - c(hemi_region, labeller, region)) %>%
+  #mutate(
+    #lm = map(data, ~ lm(measure ~ clinical_blood_results_serum_albumin + 
+                          #poly(age_at_date_of_research, degree = 2, raw = FALSE) + e_tiv, 
+                        #data = .x, na.action = na.omit)),
+    #anova = map(lm, ~ car::Anova(.x, type="III", test.statistic="F")), 
+    #anova_stats = map(anova, ~ sjstats::anova_stats(.x, digits=5))) %>%
+  #unnest(anova_stats) %>%
+  #filter(term %in% c("clinical_blood_results_serum_albumin", "Residuals")) %>%
+  #group_by(hemi_region) %>%
+  #mutate(df = paste(df, collapse=",")) %>%
+  #ungroup() %>%
+  #filter(term %in% "clinical_blood_results_serum_albumin") %>%
+  #mutate(whole.sub = ifelse(region %in% "Whole_amygdala", "whole", "subregion")) %>%
+  #group_by(whole.sub) %>%
+  #mutate(p.adj = p.adjust(p.value, method="fdr")) %>%
+  #mutate(p.adj = as.numeric(p.adj)) %>%
+  #mutate(adj.signif = as.character(asterisk_function(p.adj))) %>%
+  #ungroup() %>%
+  #mutate(p.adj_formatted = formatC(p.adj, format="f", digits=3)) %>%
+  #arrange(hemi_region) %>%
+  #mutate(variables_group = dplyr::recode(hemi_region, !!!variables_grouper.glm, .default = "missing group"))
+
+#albumin_glm %>%
+ #dplyr::select(labeller, statistic, df, p.adj_formatted, adj.signif) %>%
+  #knitr::kable(format = "html", digits=2, col.names = c("Amygdala (sub)region", "F", "df", "FDR-q", "Adj. signif."), align = "l", caption = "Age-adjusted GLMs in AN: Amygdala (nuclei) volumes in AN are independent of serum albumin concentration") %>%
+  #kable_paper(bootstrap_options="striped", full_width=FALSE, position="left", html_font="Arial",
+              #font_size="10") %>%
+  #add_header_above(c("Albumin concentration measured in serum approximately one hour before scanning. AN did not present with hypoalbuminemia. Albumin is unlikely to serve as explanation for amygdala (nuclei) volume alterations in AN."=5), align="l") %>%
+  #pack_rows(index = table(fct_inorder(albumin_glm$variables_group)))
+```
+
+
+# SM models 2: SM sample, clinical variables 
+
+```{r covariates, include=TRUE, results="asis", message=FALSE, warning=FALSE}
+m.data_age %>%
+  left_join(redcap_clinical, by="storage_name") %>% 
+  distinct(storage_name, .keep_all = TRUE) %>%
+  dplyr::select(storage_name, current_cigarettes_per_day) %>%
+  ggplot(aes(x=current_cigarettes_per_day)) +
+      geom_histogram(aes(y=..count..), binwidth=bw, alpha=0.7, position="identity") +
+  theme(panel.background = element_rect(fill="transparent"), 
+        plot.background = element_rect(fill="transparent", color=NA), 
+        panel.border = element_blank(),
+        panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank())
+
+m.data_age %>%
+  left_join(redcap_clinical, by="storage_name") %>% 
+  distinct(storage_name, .keep_all = TRUE) %>%
+  dplyr::select(storage_name, hand_preference_total_value) %>%
+  ggplot(aes(x=hand_preference_total_value)) +
+      geom_histogram(aes(y=..count..), binwidth=bw, alpha=0.7, position="identity") +
+      geom_histogram(aes(y=..count..), binwidth=bw, alpha=0.7, position="identity") +
+  theme(panel.background = element_rect(fill="transparent"), 
+        plot.background = element_rect(fill="transparent", color=NA), 
+        panel.border = element_blank(),
+        panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank())
+
+covdata <- glmdata %>%
+  left_join(redcap_clinical, by="storage_name") %>%
+  mutate(hand_preference_score = hand_preference_total_value) %>%
+  mutate(hand_preference_cat = ifelse(hand_preference_total_value == 0, 0, hand_preference_cat)) %>%
+  mutate(hand_preference = na_if(hand_preference_cat, -99)) %>%
+  mutate(hand_preference = factor(hand_preference, levels=c(0,1,2), labels=c("right", "both", "left"))) %>% 
+  mutate(smoking = na_if(current_smoking, "weiss nicht / verweigert")) %>%
+  mutate(smoking = factor(smoking, levels=c("nein","gelegentlich", "ja"))) %>%
+  mutate(n_cigarettes = ifelse(!is.na(smoking) & is.na(current_cigarettes_per_day), 0, 
+                               ifelse(!is.na(smoking) & !is.na(current_cigarettes_per_day), 
+                                      current_cigarettes_per_day, NA))) %>%
+  mutate(psych_comorbidity = ifelse((point_of_research %in% "T1") & ((depressive_disorders %in% "ja") |
+                                      (anxiety_disorders %in% "ja") | 
+                                      (obsessivecompulsive_disorders %in% "ja") | 
+                                      (ptsd %in% "ja")), 
+                                    1, 0)) %>%
+  mutate(psych_comorbidity = factor(psych_comorbidity, levels=c(0,1), labels=c("no", "yes"))) %>%
+  mutate(antidepressants = ifelse((type_of_current_medication___1 %in% "Checked") | 
+                                    (type_of_recent_medication___1 %in% "Checked"), 
+                                  1, 0)) %>%
+  mutate(antidepressants = factor(antidepressants, levels=c(0,1), labels=c("no", "yes"))) %>%
+  dplyr::select(storage_name, point_of_research, hemi_region, region, labeller, measure, age_at_date_of_research, e_tiv, iq, hand_preference_score, hand_preference, smoking, n_cigarettes, psych_comorbidity, antidepressants)
+
+# SM descriptives table
+smdescriptives_hand <- covdata %>%
+  distinct(storage_name, .keep_all=TRUE) %>%
+  group_by(point_of_research) %>%
+  rstatix::get_summary_stats(hand_preference_score) %>%
+  dplyr::select(point_of_research, variable, n, mean, sd) %>%
+  ungroup()
+
+handedness <- covdata %>%
+  distinct(storage_name, .keep_all=TRUE) %>%
+  filter(!is.na(hand_preference)) %>%
+  group_by(point_of_research, hand_preference) %>%
+  count(.) %>%
+  rename(variable = hand_preference) %>%
+  mutate(mean = NA, sd = NA) %>%
+  ungroup()
+
+smoking <- covdata %>%
+  distinct(storage_name, .keep_all=TRUE) %>%
+  filter(!is.na(smoking)) %>%
+  group_by(point_of_research, smoking) %>%
+  count(.) %>%
+  rename(variable = smoking) %>%
+  mutate(mean = NA, sd = NA) %>%
+  ungroup()
+
+smdescriptives_smoking <- covdata %>%
+  distinct(storage_name, .keep_all=TRUE) %>%
+  group_by(point_of_research) %>%
+  rstatix::get_summary_stats(n_cigarettes) %>%
+  dplyr::select(point_of_research, variable, n, mean, sd) %>%
+  ungroup()
+
+smdescriptives <- rbind(smdescriptives_hand, handedness, smoking, smdescriptives_smoking)
+
+smdescriptives_HC <- smdescriptives %>%
+  filter(point_of_research %in% "HCW") %>%
+  dplyr::select(-point_of_research)
+
+smdescriptives_T1 <- smdescriptives %>%
+  filter(point_of_research %in% "T1")  %>%
+  dplyr::select(-point_of_research) %>%
+  left_join(smdescriptives_HC, by="variable")
+
+smttestdata <- covdata %>%
+  mutate(point_of_research = relevel(point_of_research, ref="HCW")) %>% # reference group = HC participants
+  distinct(storage_name, .keep_all=TRUE) %>%
+  dplyr::select(point_of_research, hand_preference_score, n_cigarettes) %>%
+  pivot_longer(-point_of_research, names_to = "variable", values_to = "value") %>% 
+  nest(data = -variable) %>% 
+  mutate(
+     ttest = map(data, ~ t.test(value ~ point_of_research, data = .x, na.action=na.omit,
+                                paired=FALSE, alternative="two.sided", var.equal=FALSE)),
+     tidied = map(ttest, tidy)) %>%
+  unnest(tidied) %>%
+  dplyr::select(variable, statistic, p.value)
+
+chisq.handedness_pre <- covdata %>%
+  distinct(storage_name, .keep_all=TRUE) %>%
+  dplyr::select(storage_name, point_of_research, hand_preference)
+
+xtabs(~ chisq.handedness_pre$point_of_research + chisq.handedness_pre$hand_preference)
+
+chisq.handedness <- chisq.test(chisq.handedness_pre$point_of_research, chisq.handedness_pre$hand_preference) %>% 
+  tidy() %>%
+  mutate(p.value.handedness = formatC(p.value, format="f", digits=3)) %>%
+  dplyr::select(p.value.handedness) %>%
+  mutate(variable = "right")
+
+fisher.smoking_pre <- covdata %>%
+  distinct(storage_name, .keep_all=TRUE) %>%
+  dplyr::select(storage_name, point_of_research, smoking)
+
+xtabs(~ fisher.smoking_pre$point_of_research + fisher.smoking_pre$smoking)
+
+fisher.smoking <- fisher.test(fisher.smoking_pre$point_of_research, fisher.smoking_pre$smoking) %>% 
+  tidy() %>%
+  mutate(p.value.smoking = formatC(p.value, format="f", digits=3)) %>%
+  dplyr::select(p.value.smoking) %>% 
+  mutate(variable = "nein")
+```
+
+```{r smdescriptivesjoin, results="asis", message=FALSE, warning=FALSE}
+smdescriptives_T1 %>%
+  left_join(smttestdata, by="variable") %>%
+  left_join(chisq.handedness, by="variable") %>%
+  left_join(fisher.smoking, by="variable") %>%
+  mutate(df = ifelse(variable %in% c("hand_preference_score", "n_cigarettes"), (n.x+n.y)-2, NA)) %>% 
+  unite("N", c(n.x, n.y), sep = " / ", remove = FALSE, na.rm = FALSE) %>%
+  mutate(mean.x = formatC(mean.x, format="f", digits=2)) %>%
+  mutate(mean.y = formatC(mean.y, format="f", digits=2)) %>%
+  mutate(sd.x = formatC(sd.x, format="f", digits=2)) %>%
+  mutate(sd.y = formatC(sd.y, format="f", digits=2)) %>%
+  unite("mean_sd_AN", c(mean.x, sd.x), sep = " ± ", remove = FALSE, na.rm = FALSE) %>%
+  unite("mean_sd_HC", c(mean.y, sd.y), sep = " ± ", remove = FALSE, na.rm = FALSE) %>%
+  mutate(mean_sd_AN = ifelse(variable %in% c("hand_preference_score", "n_cigarettes"), mean_sd_AN, NA)) %>%
+  mutate(mean_sd_HC = ifelse(variable %in% c("hand_preference_score", "n_cigarettes"), mean_sd_HC, NA)) %>%
+  mutate_all(funs(replace_na(., ""))) %>%
+  mutate(p.value_formatted = ifelse(variable %in% c("hand_preference_score", "n_cigarettes"), 
+                                    formatC(as.numeric(p.value), format="f", digits=3), "")) %>%
+  mutate(statistic_formatted = ifelse(variable %in% c("hand_preference_score", "n_cigarettes"), 
+                                    formatC(as.numeric(statistic), format="f", digits=2), "")) %>%
+  mutate(variable = dplyr::recode(variable,
+                                  "hand_preference_score" = "Annett Scale of Hand Preference: Total Score",
+                                  "right" = "Right-side preference",
+                                  "both" = "Mixed handedness",
+                                  "left" = "Left-side preference",
+                                  "nein" = "Non-smoker",
+                                  "gelegentlich" = "Occasional smoker",
+                                  "ja" = "Smoker",
+                                  "n_cigarettes" = "n(cigarettes)/day")) %>%
+  dplyr::select(variable, N, mean_sd_AN, mean_sd_HC, statistic_formatted, df, p.value_formatted, 
+                p.value.handedness, p.value.smoking) %>%
+  knitr::kable(format = "html", col.names = c("", "AN / HC", "AN", "HC", "|t|", "df", "p", "p", "p"), align = "l", 
+               caption = "Table SMx. Further demographic variables") %>%
+  kable_paper(bootstrap_options="striped", full_width=FALSE, position="left", html_font="Arial", font_size="9") %>%
+  add_header_above(c("", "n", "Sample"=2, "Analyses"=3, "Handedness: Chi-squared test"=1, "Smoking: Fisher's exact test"=1), align="l") %>% 
+  pack_rows("Handedness", 1,4)  %>% 
+  pack_rows("Current smoking", 5, 8)
+```
+
+## SM GLM computation 1 (main study sample, further clinical covariates)
+
+```{r glmamygdalacov, results="asis", message=FALSE, warning=FALSE}
+ancova.covariates <- covdata %>%
+  mutate(point_of_research = relevel(point_of_research, ref="HCW")) %>%
+  nest(data = - c(hemi_region, labeller, region)) %>%
+  mutate(
+    lm = map(data, ~ lm(measure ~ point_of_research + poly(age_at_date_of_research, degree = 2, raw = FALSE) + 
+                          e_tiv + iq + hand_preference_score + smoking + n_cigarettes, 
+                        data = .x, na.action = na.omit)),
+    adj.means = map(lm, ~ emmeans(.x, "point_of_research", type="response")),
+    tidymeans = map(adj.means, tidy),
+    anova = map(lm, ~ car::Anova(.x, type="III", test.statistic="F")), 
+    anova_stats = map(anova, ~ sjstats::anova_stats(.x, digits=5))) %>%
+  unnest(anova_stats) %>%
+  mutate(whole.sub = ifelse(region %in% "Whole_amygdala", "whole", "subregion")) %>%
+  group_by(whole.sub, term) %>%
+  mutate(p.adj = p.adjust(p.value, method="fdr")) %>%
+  mutate(p.adj = as.numeric(p.adj)) %>%
+  mutate(adj.signif = as.character(asterisk_function(p.adj))) %>%
+  ungroup() %>%
+  filter(term %in% "point_of_research") %>%
+  dplyr::select(region, hemi_region, labeller, tidymeans, term, sumsq, df, statistic, p.value, p.adj, 
+                adj.signif, partial.etasq) %>%
+  arrange(hemi_region)
+
+emmeans.covariates <- ancova.covariates %>%
+  dplyr::select(hemi_region, region, labeller, tidymeans) %>%
+  unnest(tidymeans) %>% 
+  dplyr::select(hemi_region, region, labeller, point_of_research, estimate, std.error)
+``` 
+
+```{r effectscov, results="asis", message=FALSE, warning=FALSE}
+ancova.covariates %>%
+  filter(p.adj < 0.05) %>%
+  mutate(partial.etasq = formatC(partial.etasq, format="f", digits=3)) %>%
+  unite("effectsize", c(labeller, partial.etasq), sep = ", ", remove = FALSE, na.rm = FALSE) %>%
+  summarize(effects = paste(effectsize, collapse="; ")) %>%
+  knitr::kable(format = "html", col.names = c("GLM effect size statistics (main sample, further clinical variables, only significant nuclei)"), align = "l") %>%
+  kable_paper(bootstrap_options="striped", full_width=FALSE, position="left", html_font="Arial", font_size="10") 
+```
+
+```{r figurebarplotcov, fig.cap="Barplots for SM GLMs 1 (clinical variables)", echo=TRUE, message=FALSE, warning=FALSE}
+bardata.covariates <- emmeans.covariates %>%
+  group_by(region) %>% arrange(region, .by_group=TRUE) %>%
+  mutate(point_of_research = dplyr::recode(point_of_research,
+                                    "T1" = "AN",
+                                    "HCW" = "HC")) %>%
+  mutate(xlabels = ifelse(region %in% c("Whole_amygdala", "Lateral_nucleus", "Medial_nucleus", "Paralaminar_nucleus"), TRUE, FALSE))
+
+y.position.bar <- emmeans.covariates %>% 
+  group_by(region) %>%
+  arrange(desc(estimate), .by_group=TRUE) %>%
+  slice_head(n = 1) %>%
+  mutate(ymin = round((0.90*estimate)-5, -1)) %>%
+  mutate(ymax = round((1.05*estimate)+5, -1)) %>%
+  mutate(y.position = (0.87*(ymax-ymin))+ymin) %>%
+  dplyr::select(region, y.position, ymin, ymax) %>%
+  ungroup()
+
+plotlist = list()
+
+for (Region in unique(bardata.covariates$region)) {
+  
+  plotdata <- bardata.covariates %>% filter(region %in% Region)
+  
+  pvalues <- ancova.covariates %>%
+    filter(term %in% "point_of_research") %>%
+    filter(region %in% Region) %>%
+    rename(point_of_research = term) %>%
+    dplyr::select(region, hemi_region, labeller, point_of_research, adj.signif, p.adj) %>%
+    left_join(y.position.bar, by="region") %>%
+    mutate(xmin = 1) %>%
+    mutate(xmax = 2)
+  
+  effsize <- ancova.covariates %>%
+    filter(term %in% "point_of_research") %>%
+    filter(region %in% Region) %>%
+    rename(point_of_research = term) %>%
+    dplyr::select(region, hemi_region, labeller, point_of_research, partial.etasq) %>%
+    left_join(y.position.bar, by="region") %>%
+    mutate(label = "η[p]^2") %>%
+    mutate(partial.etasq_formatted = ifelse(partial.etasq < 0.001, "<0.001", 
+                                            as.character(formatC(partial.etasq, format="f", digits=3,
+                                                                 drop0trailing=FALSE)))) %>%
+    mutate(y.position.eff = ymax) %>%
+    mutate(x.position.label = 0.65) %>%
+    mutate(x.position.eff = 1.24)
+
+  yaxis <- y.position.bar %>%
+    filter(region %in% Region)
+  
+  barplots <- plotdata %>%
+    ggplot(aes(x=point_of_research, y=estimate, fill = point_of_research, color = point_of_research)) +
+    geom_col(stat="identity", color=NA, position=position_dodge()) +
+    geom_errorbar(aes(ymin=estimate-std.error, ymax=estimate+std.error), width=0.2, 
+                  size=1.0, color = "BLACK", position=position_dodge(1)) +
+    geom_signif(data=pvalues, aes(annotations = adj.signif, y_position = y.position, 
+                                  xmin = xmin, xmax = xmax), 
+              tip_length = 0.09, textsize=14, vjust=-0.08, color = "BLACK", manual = TRUE) +
+    geom_text(data=effsize, aes(label = label, x = x.position.label, y = y.position.eff),
+              size = 9, color = "gray40", parse = TRUE) +
+    geom_text(data=effsize, aes(label = partial.etasq_formatted, x = x.position.eff, y = y.position.eff),
+              size = 9, color = "gray40", parse = FALSE) +
+    coord_cartesian(ylim=c(yaxis$ymin, yaxis$ymax)) +
+    scale_fill_jama(alpha=0.8) + scale_color_jama(alpha=0.8) +
+    plot_theme_transparent2 + 
+    scale_y_continuous(breaks = pretty_breaks(n=3), labels = scales::comma_format(big.mark = ",",
+                                                                                  decimal.mark = ".",
+                                                                                  accuracy=1L)) +
+    theme(axis.title.x = element_blank(), axis.title.y = element_blank(), axis.ticks.y = 
+            element_line(size=1.5), axis.ticks.x = element_line(size=1.5), 
+          axis.ticks.length.y=unit(.25, "cm"), axis.ticks.length.x=unit(.25, "cm")) +
+    guides(fill = FALSE, color = FALSE) +
+    facet_wrap(~ labeller, scales="free_x", labeller = label_wrap_gen(width=15))
+  
+  if(plotdata$xlabels == FALSE) {
+   barplots = barplots + 
+     theme(axis.text.x=element_blank(), axis.ticks.x=element_blank())
+   }
+  
+ plotlist[[Region]] = barplots
+ 
+}
+
+bp.whole.covariates <- plotlist$Whole_amygdala
+bp.nuclei.covariates <- plotlist[1:9] 
+
+barplotarrange.covariates <- ggarrange(bp.whole.covariates, 
+          ggarrange(plotlist=bp.nuclei.covariates, ncol=3, nrow=3),
+          ncol=2, widths=c(1,2)) %>%
+    annotate_figure(left = text_grob(expression(paste("Volumes (EMM ± SEM) in mm"^"3")), size=32, rot=90))
+
+barplotarrange.covariates
+
+ggsave(barplotarrange.covariates, path="figures", filename="barplots_amy_glm_clinical_covariates.png", width=30, height=27, dpi=400)
+```
+
+
+## SM GLM computation 2 (SM sample after exclusions of acAN with comorbidities and/or medication, no further clinical variables)
+
+```{r agematchsm, message=FALSE, warning=FALSE}
+sm.matchdata_age <- covdata %>%
+  filter((psych_comorbidity == "no") & (antidepressants == "no")) %>%
+  mutate(point_of_research = dplyr::recode(point_of_research,
+                                    "HCW" = 0, # 0 for the control group
+                                    "T1" = 1)) %>% # 1 for the acAN patient ("treated") group
+  mutate(point_of_research = as.numeric(point_of_research)) %>% 
+  distinct(storage_name, .keep_all = TRUE) %>%
+  dplyr::select(storage_name, point_of_research, age_at_date_of_research) %>%
+  matchit(point_of_research ~ age_at_date_of_research, data = ., method = "optimal", ratio = 1)
+
+summary(sm.matchdata_age, standardize=FALSE)
+
+sm.data_age <- match.data(sm.matchdata_age) %>%
+  dplyr::select(storage_name)
+
+sm.glmdata <- covdata %>% 
+  semi_join(sm.data_age, by="storage_name") %>%
+  mutate(point_of_research = fct_relevel(point_of_research, c("T1", "HCW"))) 
+```
+
+```{r glmamygdalaexclusion, results="asis", message=FALSE, warning=FALSE}
+ancova.sm <- sm.glmdata %>%
+  mutate(point_of_research = relevel(point_of_research, ref="HCW")) %>%
+  nest(data = -c(hemi_region, labeller, region)) %>%
+  mutate(
+     lm = map(data, ~ lm(measure ~ point_of_research + poly(age_at_date_of_research, degree = 2, raw = FALSE) + e_tiv,
+                        data = .x, na.action = na.omit)),
+    adj.means = map(lm, ~ emmeans(.x, "point_of_research", type="response")),
+    tidymeans = map(adj.means, tidy),
+    anova = map(lm, ~ car::Anova(.x, type="III", test.statistic="F")), 
+    anova_stats = map(anova, ~ sjstats::anova_stats(.x, digits=5))) %>%
+  unnest(anova_stats) %>%
+  mutate(whole.sub = ifelse(region %in% "Whole_amygdala", "whole", "subregion")) %>%
+  group_by(whole.sub, term) %>%
+  mutate(p.adj = p.adjust(p.value, method="fdr")) %>%
+  mutate(p.adj = as.numeric(p.adj)) %>%
+  mutate(adj.signif = as.character(asterisk_function(p.adj))) %>%
+  ungroup() %>%
+  filter(term %in% "point_of_research") %>%
+  dplyr::select(region, hemi_region, labeller, tidymeans, term, sumsq, df, statistic, p.value, p.adj, 
+                adj.signif, partial.etasq) %>%
+  arrange(hemi_region)
+
+emmeans.sm <- ancova.sm %>%
+  dplyr::select(hemi_region, region, labeller, tidymeans) %>%
+  unnest(tidymeans) %>% 
+  dplyr::select(hemi_region, region, labeller, point_of_research, estimate, std.error)
+``` 
+
+```{r effectsexclusion, results="asis", message=FALSE, warning=FALSE}
+ancova.sm %>%
+  filter(p.adj < 0.05) %>%
+  mutate(partial.etasq = formatC(partial.etasq, format="f", digits=3)) %>%
+  unite("effectsize", c(labeller, partial.etasq), sep = ", ", remove = FALSE, na.rm = FALSE) %>%
+  summarize(effects = paste(effectsize, collapse="; ")) %>%
+  knitr::kable(format = "html", col.names = c("GLM effect size statistics (acAN exclusions, only significant nuclei)"), align = "l") %>%
+  kable_paper(bootstrap_options="striped", full_width=FALSE, position="left", html_font="Arial", font_size="10") 
+```
+
+```{r figurebarplotexclusion, fig.cap="Barplots for SM GLMs 1 (acAN exclusions)", echo=TRUE, message=FALSE, warning=FALSE}
+bardata.sm <- emmeans.sm %>%
+  group_by(region) %>% arrange(region, .by_group=TRUE) %>%
+  mutate(point_of_research = dplyr::recode(point_of_research,
+                                    "T1" = "AN",
+                                    "HCW" = "HC")) %>%
+  mutate(xlabels = ifelse(region %in% c("Whole_amygdala", "Lateral_nucleus", "Medial_nucleus", "Paralaminar_nucleus"), TRUE, FALSE))
+
+y.position.bar <- emmeans.sm %>% 
+  group_by(region) %>%
+  arrange(desc(estimate), .by_group=TRUE) %>%
+  slice_head(n = 1) %>%
+  mutate(ymin = round((0.90*estimate)-5, -1)) %>%
+  mutate(ymax = round((1.05*estimate)+5, -1)) %>%
+  mutate(y.position = (0.85*(ymax-ymin))+ymin) %>%
+  dplyr::select(region, y.position, ymin, ymax) %>%
+  ungroup()
+
+plotlist = list()
+
+for (Region in unique(bardata.sm$region)) {
+  
+  plotdata <- bardata.sm %>% filter(region %in% Region)
+  
+  pvalues <- ancova.sm %>%
+    filter(term %in% "point_of_research") %>%
+    filter(region %in% Region) %>%
+    rename(point_of_research = term) %>%
+    dplyr::select(region, hemi_region, labeller, point_of_research, adj.signif, p.adj) %>%
+    left_join(y.position.bar, by="region") %>%
+    mutate(xmin = 1) %>%
+    mutate(xmax = 2)
+  
+  effsize <- ancova.sm %>%
+    filter(term %in% "point_of_research") %>%
+    filter(region %in% Region) %>%
+    rename(point_of_research = term) %>%
+    dplyr::select(region, hemi_region, labeller, point_of_research, partial.etasq) %>%
+    left_join(y.position.bar, by="region") %>%
+    mutate(label = "η[p]^2") %>%
+    mutate(partial.etasq_formatted = ifelse(partial.etasq < 0.001, "<0.001", 
+                                            as.character(formatC(partial.etasq, format="f", digits=3,
+                                                                 drop0trailing=FALSE)))) %>%
+    mutate(y.position.eff = ymax) %>%
+    mutate(x.position.label = 0.65) %>%
+    mutate(x.position.eff = 1.24)
+
+  yaxis <- y.position.bar %>%
+    filter(region %in% Region)
+  
+  barplots <- plotdata %>%
+    ggplot(aes(x=point_of_research, y=estimate, fill = point_of_research, color = point_of_research)) +
+    geom_col(stat="identity", color=NA, position=position_dodge()) +
+    geom_errorbar(aes(ymin=estimate-std.error, ymax=estimate+std.error), width=0.2, 
+                  size=1.0, color = "BLACK", position=position_dodge(1)) +
+    geom_signif(data=pvalues, aes(annotations = adj.signif, y_position = y.position, 
+                                  xmin = xmin, xmax = xmax), 
+              tip_length = 0.09, textsize=14, vjust=-0.1, color = "BLACK", manual = TRUE) +
+    geom_text(data=effsize, aes(label = label, x = x.position.label, y = y.position.eff),
+              size = 9, color = "gray40", parse = TRUE) +
+    geom_text(data=effsize, aes(label = partial.etasq_formatted, x = x.position.eff, y = y.position.eff),
+              size = 9, color = "gray40", parse = FALSE) +
+    coord_cartesian(ylim=c(yaxis$ymin, yaxis$ymax)) +
+    scale_fill_jama(alpha=0.8) + scale_color_jama(alpha=0.8) +
+    plot_theme_transparent2 + 
+    scale_y_continuous(breaks = pretty_breaks(n=3), labels = scales::comma_format(big.mark = ",",
+                                                                                  decimal.mark = ".",
+                                                                                  accuracy=1L)) +
+    theme(axis.title.x = element_blank(), axis.title.y = element_blank(), axis.ticks.y = 
+            element_line(size=1.5), axis.ticks.x = element_line(size=1.5), 
+          axis.ticks.length.y=unit(.25, "cm"), axis.ticks.length.x=unit(.25, "cm")) +
+    guides(fill = FALSE, color = FALSE) +
+    facet_wrap(~ labeller, scales="free_x", labeller = label_wrap_gen(width=15))
+  
+  if(plotdata$xlabels == FALSE) {
+   barplots = barplots + 
+     theme(axis.text.x=element_blank(), axis.ticks.x=element_blank())
+   }
+  
+ plotlist[[Region]] = barplots
+ 
+}
+
+bp.whole.sm <- plotlist$Whole_amygdala
+bp.nuclei.sm <- plotlist[1:9] 
+
+barplotarrange.sm <- ggarrange(bp.whole.sm, 
+          ggarrange(plotlist=bp.nuclei.sm, ncol=3, nrow=3),
+          ncol=2, widths=c(1,2)) %>%
+    annotate_figure(left = text_grob(expression(paste("Volumes (EMM ± SEM) in mm"^"3")), size=32, rot=90))
+
+barplotarrange.sm
+
+ggsave(barplotarrange.sm, path="figures", filename="barplots_amy_glm_ANexclusion.png", width=30, height=27, dpi=400)
+```
+
+```{r figurelegends, message=FALSE, warning=FALSE}
+legend_all_study_groups <- bardata.sm %>%
+  filter(labeller %in% "Whole amygdala lh") %>%
+  ggplot(aes(x=point_of_research, y=estimate)) +
+  geom_col(aes(x=point_of_research, y=estimate, fill = point_of_research, color = point_of_research), 
+           stat = "identity", color = NA, width=0.9, position = position_dodge()) +
+  plot_theme_transparent2 + 
+  scale_fill_manual(values = alpha(c("#374E55FF", "#DF8F44FF", "#000000"), 1.0)) + 
+  scale_color_manual(values = alpha(c("#374E55FF", "#DF8F44FF", "#000000"), 1.0)) +
+  theme(axis.text.x = element_blank()) +
+  guides(fill = guide_legend(title="Study groups")) +
+  theme(legend.text = element_text(size=11), legend.title=element_text(size=11))
+ggsave(legend_all_study_groups, path="figures", filename="legend_all_study_groups.png", width=10, height=10, dpi=400)
+```
+
+
+# RLMS including clinical measures (only for significant regions)
+FDR correction: across all whole amygdala vs. amygdala nuclei and across groups of contextually-related clinical measures (group 1: BMI-SDS and leptin, group 2: duration of illness, group 3: all psychiatric symptom measures)
+
+```{r robustregressionfiltered, results="asis", message=FALSE, warning=FALSE}
+asterisk_function <- function(x) {
+  ifelse(is.na(x), NA, 
+  symnum(x, corr=FALSE, na = FALSE, legend = FALSE,
+         cutpoints = c(0, 0.001, 0.01, 0.05, 1), 
+         symbols = c("(* * *)", "(* *)", "(*)", "ns"))
+  )
+}
+
+rlmdata.filtered <- glmdata %>%
+  filter(hemi_region %in% c("lh_Accessory_basal_nucleus", "rh_Accessory_basal_nucleus", "lh_Cortical_nucleus", "rh_Cortical_nucleus", "lh_Corticoamygdaloid_transitio", "rh_Corticoamygdaloid_transitio", "lh_Medial_nucleus")) %>% 
+  mutate(hemi_region = factor(hemi_region, levels=c("lh_Accessory_basal_nucleus", "rh_Accessory_basal_nucleus", "lh_Cortical_nucleus", "rh_Cortical_nucleus", "lh_Corticoamygdaloid_transitio", "rh_Corticoamygdaloid_transitio", "lh_Medial_nucleus"))) %>%
+  filter(point_of_research %in% "T1") %>%
+  left_join(stai, by="storage_name") %>%
+  left_join(redcap_analysis, by="storage_name") %>% 
+  dplyr::select(storage_name, hemi_region, region, labeller, age_at_date_of_research, e_tiv,
+                measure, bmisds_at_date_of_research, log_leptin, onset_of_an, edi_core,
+                resultquest_bdi2_total, resultquest_scl90r_skagloba, s.anxiety, t.anxiety) %>%
+  pivot_longer(-c(storage_name, hemi_region, region, labeller, age_at_date_of_research, e_tiv, measure), 
+               names_to = "demo_variable", values_to = "value") %>%
+  nest(-c(hemi_region, region, labeller, demo_variable)) %>%
+  mutate(
+    rlm = map(data, ~ rlm(measure ~ value + poly(age_at_date_of_research, degree = 2, raw = FALSE) + e_tiv, 
+                          data=.x, na.action = na.omit)),
+    tidyrlm = map(rlm, tidy),
+    tidyrlm = map(tidyrlm, ~ rename(.x, t.value = statistic)),
+    testrlm = map(rlm, ~ f.robftest(.x, var = "value")),
+    tidytestrlm = map(testrlm, tidy),
+    tidytestrlm = map(tidytestrlm, ~ rename(.x, F.value = statistic)),
+    filterrlm = map(tidyrlm, ~ filter(.x, term %in% "value"))) %>%
+  unnest(tidytestrlm, filterrlm) %>%
+  mutate(unadj.signif = as.character(asterisk_function(p.value))) %>%
+  mutate(p.adj.groups = ifelse(demo_variable %in% c("bmisds_at_date_of_research", 
+                                                    "log_leptin"), "group01",
+                               ifelse(demo_variable %in% "onset_of_an", "group02", "group03"))) %>%
+  group_by(p.adj.groups) %>%
+  mutate(p.adj = p.adjust(p.value, method="fdr")) %>%
+  mutate(adj.signif = as.character(asterisk_function(p.adj))) %>%
+  ungroup() %>% 
+  mutate(p.value_formatted = formatC(p.value, format="f", digits=3)) %>%
+  mutate(p.adj_formatted = formatC(p.adj, format="f", digits=3)) %>%
+  dplyr::select(hemi_region, labeller, demo_variable, t.value, p.value_formatted, unadj.signif, 
+                p.adj_formatted, adj.signif) %>%
+  nest(-c(hemi_region, labeller, demo_variable)) %>%
+  group_by(hemi_region) %>%
+  pivot_wider(names_from = "demo_variable", values_from = "data") %>%
+  unnest(bmisds_at_date_of_research, log_leptin, onset_of_an, edi_core, resultquest_bdi2_total,
+         resultquest_scl90r_skagloba, s.anxiety, t.anxiety) %>%
+  arrange(hemi_region) %>%
+  mutate(hemi_region = as.character(hemi_region)) %>%
+  mutate(variables_group = dplyr::recode(hemi_region, !!!variables_grouper.glm, 
+                                         .default = "missing group")) %>%
+  ungroup()
+
+rlmdata.filtered %>%
+  dplyr::select(-c(hemi_region, variables_group)) %>%
+  knitr::kable(format = "html", digits=2, align = "l", col.names=c("Significant amygdala (sub)region", rep(c("t", "p", "Unadj. signif.", "p.adj", "Adj. signif."), 8)), caption = "Robust regression models in acAN (adjusted for linear and nonlinear (quadratic) age effects (orthogonal polynomials) and eTIV)") %>%
+  kable_paper(bootstrap_options="striped", full_width=FALSE, position="left", html_font="Arial", font_size="10") %>%
+  add_header_above(c(" ", "Amygdala ~ Current BMI-SDS"=5, "Amygdala ~ log(10) leptin"=5, "Amygdala ~ Duration of illness"=5,
+                     "Amygdala ~ EDI-2 core"=5, "Amygdala ~ BDI-II total score"=5,  "Amygdala ~ SCL-90-R GSI"=5,
+                     "Amygdala ~ STAI(K) State Anxiety Score"=5, 
+                     "Amygdala ~ STAI(K) Trait Anxiety Score"=5), align="l") %>%
+  pack_rows(index = table(fct_inorder(rlmdata.filtered$variables_group))) #%>%
+  #save_kable("robust_regression.png", zoom=8)
+```
+
+```{r mediation, message=FALSE, warning=FALSE, eval=FALSE}
+# Mediation analysis based on the path analysis framework using structural equation modeling (SEM) included in the R package "lavaan"
+# Estimation of unstandardized indirect effect via the product of coefficients approach and of confidence intervals via resembling (percentile bootstrapping) method 
+
+specmod <- "
+# Path c (direct effect)
+measure_residual ~ c*log_leptin
+
+# Path a
+bmisds_at_date_of_research ~ a*log_leptin
+
+# Path b
+measure_residual ~ b*bmisds_at_date_of_research
+
+# Indirect effect (Product of coefficients)
+ab := a*b
+"
+
+# Resempling method / Percentile bootstrapping
+set.seed(1000)
+
+mediationdata <- glmdata %>%
+  filter(hemi_region %in% c("lh_Accessory_basal_nucleus", "rh_Accessory_basal_nucleus", "lh_Cortical_nucleus", "rh_Cortical_nucleus", "lh_Corticoamygdaloid_transitio", "rh_Corticoamygdaloid_transitio")) %>% 
+  mutate(hemi_region = factor(hemi_region, levels=c("lh_Accessory_basal_nucleus", "rh_Accessory_basal_nucleus", "lh_Cortical_nucleus", "rh_Cortical_nucleus", "lh_Corticoamygdaloid_transitio", "rh_Corticoamygdaloid_transitio"))) %>%
+  filter(point_of_research %in% "T1") %>%
+  left_join(redcap_analysis, by="storage_name") %>%
+  dplyr::select(storage_name, hemi_region, age_at_date_of_research, e_tiv,
+                measure, bmisds_at_date_of_research, log_leptin) %>%
+  nest(-hemi_region) %>%
+  mutate(
+    rlm = map(data, ~ rlm(measure ~ poly(age_at_date_of_research, degree = 2, raw = FALSE) + e_tiv, 
+                     data = .x, na.action = na.omit)),
+    residuals = map(rlm, ~ .x$resid),
+    residualstidy = map(residuals, tidy)) %>%
+  dplyr::select(hemi_region, data, residualstidy) %>%
+  unnest(data, residualstidy) %>%
+  rename(measure_residual = x) %>%
+  nest(-hemi_region) %>%
+  mutate(
+    fitmod = map(data, ~ sem(specmod, data=.x, se="bootstrap", bootstrap=5000)), # number of bootstrap replications set to 5000
+    parameters = map(fitmod, ~ tibble(parameterEstimates(.x, standardized=FALSE, se=TRUE, ci=TRUE, 
+                                                         level=0.95, boot.ci.type = "perc")))) %>%
+  unnest(parameters) 
+
+mediationdata %>% 
+  write_csv("data/data_temporary/mediationdata.csv")
+```  
+  
+```{r mediation02, message=FALSE, warning=FALSE}
+mediationdata <- read_csv("data/data_temporary/mediationdata.csv")
+
+mediationdata %>%
+  arrange(hemi_region) %>%
+  dplyr::select(hemi_region, lhs, rhs, est, se, pvalue, ci.lower, ci.upper) %>% 
+  knitr::kable(format = "html", digits=3, align = "l", col.names = c("Amygdala (sub)region", "Term", "Term", "Estimated interaction effect", "Bootstrapped standard error", "p", "Bootstrapped lower value of the 95% confidence interval", "Bootstrapped upper value of the 95% confidence interval"), caption = "Mediation analysis") %>%
+  kable_paper(bootstrap_options="striped", full_width=FALSE, position="left", 
+              html_font="Arial", font_size="10") %>%
+  add_header_above(c("The bootstrapped unstandardized indirect effect of BMI-SDS on the association between log(10) leptin and the analyzed amygdala nuclei volumes was non-significant for all amygdala nuclei (95% confidence intervals included 0) except for accessory basal nucleus lh. Thus, BMI-SDS does not significantly mediate the effect of log(10) leptin on amygdala nuclei volumes (except for accessory basal nucleus lh)." = 8), align="l") %>% 
+  row_spec(which(str_detect(mediationdata$lhs, "ab")), bold=TRUE, color="darkblue") #%>%
+  #save_kable("mediation_analysis.png", zoom=5)
+```
+
+```{r bmisdsadjustment01, results="asis", message=FALSE, warning=FALSE}
+gramschmidt.data <- glmdata %>%
+  filter(point_of_research %in% "T1") %>%
+  left_join(redcap_analysis, by="storage_name") %>% 
+  distinct(storage_name, .keep_all=TRUE) %>%
+  arrange(storage_name) %>%
+  dplyr::select(storage_name, bmisds_at_date_of_research, log_leptin) %>%
+  filter(!is.na(log_leptin))
+
+#Q_orthonormal <- gramSchmidt(matrix(c(gramschmidt.data$bmisds_at_date_of_research, gramschmidt.data$log_leptin), 
+                                    #ncol = 2, byrow = FALSE, dimnames = NULL))$Q # modified procedure means more numeric stability
+
+Q_orthogonal <- matlib::GramSchmidt(matrix(c(gramschmidt.data$bmisds_at_date_of_research, gramschmidt.data$log_leptin), 
+                                 ncol = 2, byrow = FALSE, dimnames = NULL), normalize=FALSE, verbose=FALSE)
+
+gramschmidt <- cbind(gramschmidt.data, Q_orthogonal) %>%
+  rename(log_leptin_orthogonal = "2") %>%
+  dplyr::select(storage_name, log_leptin, log_leptin_orthogonal)
+
+rlmdata.adjbmisds <- glmdata %>%
+  filter(hemi_region %in% c("lh_Accessory_basal_nucleus", "rh_Accessory_basal_nucleus", "lh_Cortical_nucleus", "rh_Cortical_nucleus", "lh_Corticoamygdaloid_transitio", "rh_Corticoamygdaloid_transitio")) %>% 
+  mutate(hemi_region = factor(hemi_region, levels=c("lh_Accessory_basal_nucleus", "rh_Accessory_basal_nucleus", "lh_Cortical_nucleus", "rh_Cortical_nucleus", "lh_Corticoamygdaloid_transitio", "rh_Corticoamygdaloid_transitio"))) %>%
+  filter(point_of_research %in% "T1") %>%
+  left_join(gramschmidt, by="storage_name") %>%
+  dplyr::select(storage_name, hemi_region, region, labeller, age_at_date_of_research, bmisds_at_date_of_research,
+                e_tiv, measure, log_leptin, log_leptin_orthogonal) %>%
+  nest(-c(hemi_region, region, labeller)) %>%
+  mutate(
+    cor = map(data, ~ cor.test(.x$bmisds_at_date_of_research, .x$log_leptin, 
+                                 alternative="two.sided", method="pearson", conf.level=0.95,
+                                 na.action=na.omit)),
+    cortidy = map(cor, tidy),
+    rlm = map(data, ~ rlm(measure ~ bmisds_at_date_of_research + log_leptin_orthogonal + 
+                            poly(age_at_date_of_research, degree = 2, raw = FALSE) + e_tiv, 
+                          data=.x, na.action = na.omit)),
+    tidyrlm = map(rlm, tidy),
+    tidyrlm = map(tidyrlm, ~ rename(.x, t.value = statistic)),
+    testrlm = map(rlm, ~ f.robftest(.x, var = "log_leptin_orthogonal")),
+    tidytestrlm = map(testrlm, tidy),
+    tidytestrlm = map(tidytestrlm, ~ rename(.x, F.value = statistic)),
+    filterrlm = map(tidyrlm, ~ filter(.x, term %in% "log_leptin_orthogonal"))) %>%
+  unnest(cortidy, tidytestrlm, filterrlm) %>%
+  mutate(p.value = ifelse(p.value < 0.001, "< 0.001", formatC(p.value, format="f", digits=3))) %>% # correlation p value
+  mutate(unadj.signif = as.character(asterisk_function(p.value1))) %>%
+  mutate(p.value_formatted = formatC(p.value1, format="f", digits=3)) %>%
+  dplyr::select(hemi_region, estimate, p.value, t.value, p.value_formatted, unadj.signif)
+
+rlmdata.adjbmisds %>%
+  arrange(hemi_region) %>%
+  knitr::kable(format = "html", digits=3, align = "l", col.names = c("Amygdala (sub)region", "r (Pearson correlation BMI-SDS ~ log(10) leptin)", "p (Pearson correlation)", "RLM: t for log(10) leptin orthogonal to BMI-SDS", "RLM: p (raw)", "RLM: Undadj. signif."), 
+               caption = "Associations between log(10) leptin (orthogonalized via Gram-Schmidt procedure) and amygdala nuclei volumes, adjusted for age (linear and quadratic), eTIV, and BMI-SDS") %>%
+  kable_paper(bootstrap_options="striped", full_width=FALSE, position="left", 
+              html_font="Arial", font_size="10") #%>%
+  #save_kable("rlm_bmisds_adjusted.png", zoom=5)
+```
+
+```{r bmisdsadjustment02, results="asis", message=FALSE, warning=FALSE}
+gramschmidt.data <- glmdata %>%
+  filter(point_of_research %in% "T1") %>%
+  left_join(redcap_analysis, by="storage_name") %>% 
+  distinct(storage_name, .keep_all=TRUE) %>%
+  arrange(storage_name) %>%
+  dplyr::select(storage_name, bmisds_at_date_of_research, log_leptin) %>%
+  filter(!is.na(log_leptin))
+
+#Q_orthonormal <- gramSchmidt(matrix(c(gramschmidt.data$bmisds_at_date_of_research, gramschmidt.data$log_leptin), 
+                                    #ncol = 2, byrow = FALSE, dimnames = NULL))$Q # modified procedure means more numeric stability
+
+Q_orthogonal <- matlib::GramSchmidt(matrix(c(gramschmidt.data$bmisds_at_date_of_research, gramschmidt.data$log_leptin), 
+                                 ncol = 2, byrow = FALSE, dimnames = NULL), normalize=FALSE, verbose=FALSE)
+
+gramschmidt <- cbind(gramschmidt.data, Q_orthogonal) %>%
+  rename(log_leptin_orthogonal = "2") %>%
+  dplyr::select(storage_name, bmisds_at_date_of_research, log_leptin, log_leptin_orthogonal)
+
+rlmdata.adjbmisds <- glmdata %>%
+  filter(hemi_region %in% c("lh_Accessory_basal_nucleus", "rh_Accessory_basal_nucleus", "lh_Cortical_nucleus", "rh_Cortical_nucleus", "lh_Corticoamygdaloid_transitio", "rh_Corticoamygdaloid_transitio")) %>% 
+  mutate(hemi_region = factor(hemi_region, levels=c("lh_Accessory_basal_nucleus", "rh_Accessory_basal_nucleus", "lh_Cortical_nucleus", "rh_Cortical_nucleus", "lh_Corticoamygdaloid_transitio", "rh_Corticoamygdaloid_transitio"))) %>%
+  filter(point_of_research %in% "T1") %>%
+  left_join(gramschmidt, by="storage_name") %>%
+  left_join(redcap_clinical, by="storage_name") %>%
+  mutate(siabex_question_21_an_type = factor(dplyr::recode(siabex_question_21_an_type,
+                                                    "nein" = 0,
+                                                    "selten (weniger als 2 x pro Woche)" = 1,
+                                                    "oefter (mind. 2 x pro Woche)" = 2,
+                                                    "haeufig (bis 1 x taeglich)" = 3,
+                                                    "sehr haeufig (mehrmals taeglich)" = 4))) %>%
+  mutate(siabex_result_an_type = factor(ifelse(siabex_result_an_type == 0, NA, siabex_result_an_type))) %>%
+  dplyr::select(storage_name, hemi_region, region, labeller, age_at_date_of_research, bmisds_at_date_of_research.x,
+                e_tiv, measure, log_leptin_orthogonal, 
+                siabex_result_an_type, siabex_question_21_an_type) %>%
+  nest(-c(hemi_region, region, labeller)) %>%
+  mutate(
+    rlm = map(data, ~ rlm(measure ~ bmisds_at_date_of_research.x + log_leptin_orthogonal + 
+                            poly(age_at_date_of_research, degree = 2, raw = FALSE) + e_tiv + siabex_result_an_type +
+                            siabex_question_21_an_type, data=.x, na.action = na.omit)),
+    tidyrlm = map(rlm, tidy),
+    tidyrlm = map(tidyrlm, ~ rename(.x, t.value = statistic)),
+    testrlm = map(rlm, ~ f.robftest(.x, var = "log_leptin_orthogonal")),
+    tidytestrlm = map(testrlm, tidy),
+    tidytestrlm = map(tidytestrlm, ~ rename(.x, F.value = statistic)),
+    filterrlm = map(tidyrlm, ~ filter(.x, term %in% "log_leptin_orthogonal"))) %>%
+  unnest(tidytestrlm, filterrlm) %>%
+  mutate(unadj.signif = as.character(asterisk_function(p.value))) %>%
+  mutate(p.value_formatted = formatC(p.value, format="f", digits=3)) %>%
+  dplyr::select(hemi_region, t.value, p.value_formatted, unadj.signif)
+
+rlmdata.adjbmisds %>%
+  arrange(hemi_region) %>%
+  knitr::kable(format = "html", digits=3, align = "l", col.names = c("Amygdala (sub)region", "RLM t for log(10) leptin orthogonal to BMI-SDS", "RLM p (raw)", "Undadj. signif."), 
+               caption = "Associations between log(10) leptin (orthogonalized via Gram-Schmidt procedure) and amygdala nuclei volumes, adjusted for age (linear and quadratic), eTIV, BMI-SDS, AN subtype, and physical activity (SIAB-EX)") %>%
+  kable_paper(bootstrap_options="striped", full_width=FALSE, position="left", 
+              html_font="Arial", font_size="10")
+```
